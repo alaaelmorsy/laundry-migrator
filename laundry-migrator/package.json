@@ -8,7 +8,8 @@
     "dev": "electron . --dev",
     "build": "electron-builder --win --x64",
     "build:dir": "electron-builder --win --x64 --dir",
-    "dist:win": "electron-builder --win --x64"
+    "dist:win": "electron-builder --win --x64",
+    "release:win": "electron-builder --win --x64 --publish always"
   },
   "build": {
     "appId": "com.laundry.migration",
@@ -17,7 +18,10 @@
       "output": "dist"
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -28,7 +32,19 @@
       "!**/*.dump",
       "!dist",
       "!*.md"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "alaaelmorsy",
+        "repo": "laundry-migrator",
+        "releaseType": "release"
+      }
     ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alaaelmorsy/laundry-migrator.git"
   },
   "keywords": ["electron", "migration", "database", "mysql", "laundry"],
   "author": "",

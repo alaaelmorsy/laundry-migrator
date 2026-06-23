@@ -82,3 +82,29 @@ Common validation examples in this repository include:
 - targeted schema-to-field mapping review
 - quickstart scenario validation from the active feature docs
 - focused migration-path checks inside `laundry-migrator/`
+
+## Windows EXE Releases
+
+This repository is now set up to publish a Windows `exe` installer to GitHub Releases:
+
+- Workflow: `.github/workflows/release-windows.yml`
+- App packaging config: `laundry-migrator/package.json`
+- Release output: `laundry-migrator/dist/`
+
+### Create a new release
+
+1. Update `laundry-migrator/package.json` and change the `version` field.
+2. Commit and push your changes to `main`.
+3. Create a tag that matches the version, for example `v1.0.1`.
+4. Push the tag: `git push origin v1.0.1`
+
+GitHub Actions will then:
+
+- build the Electron app on Windows
+- generate the installer `.exe`
+- create or update the matching GitHub Release
+- upload the installer files to the release page
+
+Release page:
+
+- https://github.com/alaaelmorsy/laundry-migrator/releases

@@ -1,0 +1,47 @@
+name: Build And Release Windows EXE
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: laundry-migrator
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: laundry-migrator/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release:win
+
+      - name: Upload build artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            laundry-migrator/dist/*.exe
+            laundry-migrator/dist/*.yml
+            laundry-migrator/dist/*.blockmap
+          generate_release_notes: true
+          fail_on_unmatched_files: true
