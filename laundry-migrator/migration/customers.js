@@ -1,0 +1,177 @@
+const dbManager = require('./db');
+
+async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
+    let connected = false;
+
+    try {
+        const connectResult = await dbManager.connect(sourceConfig, targetConfig);
+        if (!connectResult.success) {
+            return { success: false, error: connectResult.error };
+        }
+        connected = true;
+
+        const sourceConn = dbManager.getSourceConnection();
+        const targetConn = dbManager.getTargetConnection();
+
+        progressCallback({ step: 'customers', percentage: 0, message: 'جاري قراءة بيانات العملاء...', type: 'info' });
+
+        // Fast column check using SHOW COLUMNS (much faster than INFORMATION_SCHEMA)
+        const [colRows] = await sourceConn.execute(`SHOW COLUMNS FROM io_customers`);
+        const columns = colRows.map(c => (c.Field || c.field || Object.values(c)[0]).toLowerCase());
+
+        const selectFields = ['cust_id', 'cust_name', 'cust_mobile', 'cust_vat_num', 'cust_points', 'cust_general_discount', 'cust_is_blacklist'];
+        if (columns.includes('address'))           selectFields.push('address');
+        if (columns.includes('customer_city'))     selectFields.push('customer_city');
+        if (columns.includes('cust_remark'))       selectFields.push('cust_remark');
+        if (columns.includes('discount_type'))     selectFields.push('discount_type');
+        if (columns.includes('discount_end_date')) selectFields.push('discount_end_date');
+
+        // Read all customers at once
+        const [customers] = await sourceConn.execute(
+            `SELECT ${selectFields.join(', ')} FROM io_customers ORDER BY cust_id`
+        );
+
+        const total = customers.length;
+        if (total === 0) {
+            progressCallback({ step: 'customers', percentage: 100, message: 'لا يوجد عملاء للنقل', type: 'info' });
+            return { success: true, migrated: 0 };
+        }
+
+        progressCallback({ step: 'customers', percentage: 10, message: `تم العثور على ${total} عميل، جاري تحضير الجدول...`, type: 'info' });
+
+        // Truncate target table first for maximum INSERT speed
+        await targetConn.query('START TRANSACTION');
+        await targetConn.query('DELETE FROM customers');
+        await targetConn.query('COMMIT');
+
+        // --- Filter: skip no-phone & duplicate phones, log each case ---
+        const rows = [];
+        const seenPhones = new Set();
+        let skippedNoPhone    = 0;
+        let skippedDuplicate  = 0;
+        const skippedLog      = [];   // collect messages to send to UI
+
+        for (const c of customers) {
+            const name  = c.cust_name  || `عميل ${c.cust_id}`;
+            const phone = c.cust_mobile ? c.cust_mobile.trim() : '';
+
+            // 1. Skip if no phone
+            if (!phone) {
+                skippedNoPhone++;
+                skippedLog.push(`⚠ تخطي (بدون جوال): ${name} [ID: ${c.cust_id}]`);
+                continue;
+            }
+
+            // 2. Skip if duplicate phone
+            if (seenPhones.has(phone)) {
+                skippedDuplicate++;
+                skippedLog.push(`⚠ تخطي (جوال مكرر ${phone}): ${name} [ID: ${c.cust_id}]`);
+                continue;
+            }
+
+            seenPhones.add(phone);
+
+            const loyaltyPoints = Math.round(parseFloat(c.cust_points) || 0);
+            const discountValue = (c.cust_general_discount && c.cust_general_discount > 0) ? c.cust_general_discount : null;
+            const discountType  = discountValue ? 'percentage' : null;
+            const isActive      = c.cust_is_blacklist ? 0 : 1;
+
+            rows.push([
+                c.cust_id,
+                name,
+                phone,
+                c.cust_vat_num || null,
+                c.address || '',
+                c.customer_city || '',
+                c.cust_remark || null,
+                isActive,
+                loyaltyPoints,
+                discountType,
+                discountValue,
+                c.discount_end_date || null
+            ]);
+        }
+
+        // Send skip log to UI (batch to avoid flooding)
+        if (skippedNoPhone > 0 || skippedDuplicate > 0) {
+            progressCallback({ step: 'customers', percentage: 15,
+                message: `تحذير: سيتم تخطي ${skippedNoPhone} عميل بدون جوال و${skippedDuplicate} عميل بجوال مكرر`, type: 'warning' });
+            // Log individual skipped entries (max 50 to avoid flooding)
+            const logSample = skippedLog.slice(0, 50);
+            for (const msg of logSample) {
+                progressCallback({ step: 'customers', percentage: 15, message: msg, type: 'warning' });
+            }
+            if (skippedLog.length > 50) {
+                progressCallback({ step: 'customers', percentage: 15,
+                    message: `... و${skippedLog.length - 50} حالة أخرى (غير معروضة لتجنب الفيضان)`, type: 'warning' });
+            }
+        }
+
+        const filteredTotal = rows.length;
+        progressCallback({ step: 'customers', percentage: 18,
+            message: `جاري نقل ${filteredTotal} عميل (تم تخطي ${skippedNoPhone + skippedDuplicate})...`, type: 'info' });
+
+        // MySQL limit: 65535 max placeholders per prepared statement
+        // 13 columns per row → max safe batch = 65535 ÷ 13 = 5041 rows
+        const BATCH_SIZE = 5000;
+        const fullBatchPlaceholder = Array(BATCH_SIZE).fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())').join(', ');
+
+        const INSERT_SQL = `
+            INSERT INTO customers (
+                id, customer_name, phone, tax_number, address, city,
+                notes, is_active, loyalty_points, discount_type, discount_value,
+                discount_expiry, created_at
+            ) VALUES {PLACEHOLDERS}`;
+
+        let migrated = 0;
+
+        for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+            const batch = rows.slice(i, i + BATCH_SIZE);
+
+            const placeholders = (batch.length === BATCH_SIZE)
+                ? fullBatchPlaceholder
+                : Array(batch.length).fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())').join(', ');
+
+            await targetConn.query('START TRANSACTION');
+            await targetConn.execute(
+                INSERT_SQL.replace('{PLACEHOLDERS}', placeholders),
+                batch.flatMap(row => row)
+            );
+            await targetConn.query('COMMIT');
+
+            migrated += batch.length;
+
+            const percentage = 18 + Math.round((migrated / filteredTotal) * 77);
+            progressCallback({
+                step: 'customers',
+                percentage,
+                message: `تم معالجة ${migrated}/${filteredTotal} عميل...`,
+                type: 'info'
+            });
+        }
+
+        progressCallback({
+            step: 'customers',
+            percentage: 100,
+            message: `✓ تم نقل ${migrated} عميل | تخطي ${skippedNoPhone} (بدون جوال) | تخطي ${skippedDuplicate} (جوال مكرر)`,
+            type: 'success'
+        });
+
+        return { success: true, migrated, skippedNoPhone, skippedDuplicate };
+
+    } catch (error) {
+        progressCallback({
+            step: 'customers',
+            percentage: 0,
+            message: `خطأ: ${error.message}`,
+            type: 'error'
+        });
+        return { success: false, error: error.message };
+    } finally {
+        if (connected) {
+            try { await dbManager.disconnect(); } catch (e) {}
+        }
+    }
+}
+
+module.exports = { migrateCustomers };

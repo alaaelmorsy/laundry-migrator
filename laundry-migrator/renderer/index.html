@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Laundry DB Migrator</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div class="app">
+
+  <!-- ── شريط علوي ── -->
+  <header class="topbar">
+    <h1>🧺 Laundry DB Migrator</h1>
+    <span class="version">v1.0.0</span>
+  </header>
+
+  <!-- ── خطوات المعالج ── -->
+  <nav class="stepper" id="stepper">
+    <div class="step active" id="step-connection">
+      <div class="step-num" id="step-num-1">1</div>
+      الاتصال
+    </div>
+    <div class="step-sep" id="sep-1"></div>
+    <div class="step" id="step-mapping">
+      <div class="step-num" id="step-num-2">2</div>
+      ربط الجداول
+    </div>
+    <div class="step-sep" id="sep-2"></div>
+    <div class="step" id="step-migration">
+      <div class="step-num" id="step-num-3">3</div>
+      النقل
+    </div>
+    <div class="step-sep" id="sep-3"></div>
+    <div class="step" id="step-summary">
+      <div class="step-num" id="step-num-4">4</div>
+      الملخص
+    </div>
+  </nav>
+
+  <!-- ── المحتوى ── -->
+  <main class="content">
+
+    <!-- ════════════════════════════════════════════════════════════════
+         صفحة ١ — إعداد الاتصال
+         ════════════════════════════════════════════════════════════════ -->
+    <section class="page active" id="page-connection">
+      <h2 style="font-size:1.2rem;font-weight:900;margin-bottom:20px;text-align:center;">إعداد الاتصال بقواعد البيانات</h2>
+
+      <div class="card">
+        <div class="card-title">🗄️ قاعدة البيانات المصدر (القديمة)</div>
+        <div class="form-grid">
+          <div><label>المضيف</label><input type="text" id="src-host" value="localhost" /></div>
+          <div><label>المنفذ</label><input type="number" id="src-port" value="3306" /></div>
+          <div><label>اسم المستخدم</label><input type="text" id="src-user" value="root" /></div>
+          <div><label>كلمة المرور</label><input type="password" id="src-pass" autocomplete="new-password" /></div>
+          <div class="span2">
+            <label>قاعدة البيانات</label>
+            <div class="db-select-wrap">
+              <select id="src-db-select" class="db-select" disabled>
+                <option value="">— اختر بعد اختبار الاتصال —</option>
+              </select>
+              <span class="db-hint" id="src-db-hint"></span>
+            </div>
+          </div>
+        </div>
+        <div class="conn-status" id="src-status"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🎯 قاعدة البيانات الهدف (الجديدة)</div>
+        <div class="form-grid">
+          <div><label>المضيف</label><input type="text" id="tgt-host" value="localhost" /></div>
+          <div><label>المنفذ</label><input type="number" id="tgt-port" value="3306" /></div>
+          <div><label>اسم المستخدم</label><input type="text" id="tgt-user" value="root" /></div>
+          <div><label>كلمة المرور</label><input type="password" id="tgt-pass" autocomplete="new-password" /></div>
+          <div class="span2">
+            <label>قاعدة البيانات</label>
+            <div class="db-select-wrap">
+              <select id="tgt-db-select" class="db-select" disabled>
+                <option value="">— اختر بعد اختبار الاتصال —</option>
+              </select>
+              <span class="db-hint" id="tgt-db-hint"></span>
+            </div>
+          </div>
+        </div>
+        <div class="conn-status" id="tgt-status"></div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-secondary" id="btn-test">🔌 اختبار الاتصال وجلب قواعد البيانات</button>
+        <button class="btn btn-primary" id="btn-connect" disabled>التالي ← ربط الجداول</button>
+      </div>
+      <p class="security-note">🔒 <strong>كلمات المرور لا تُحفظ على القرص</strong></p>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════════════════════
+         صفحة ٢ — ربط الجداول
+         ════════════════════════════════════════════════════════════════ -->
+    <section class="page" id="page-mapping">
+
+      <div class="card">
+        <div class="card-title">🔗 ربط جداول المصدر بجداول الهدف</div>
+        <p style="font-size:.85rem;color:var(--muted);margin-bottom:14px;">
+          حدد لكل جدول في المصدر (القديم) الجدول المقابل في الهدف (الجديد)، ثم اضغط "تأكيد الربط" لعرض الأعمدة المشتركة.
+        </p>
+
+        <!-- فلتر وإحصاء -->
+        <div class="map-toolbar">
+          <input type="text" id="map-search" class="log-search" placeholder="🔍 بحث في الجداول..." style="max-width:260px;" />
+          <span id="map-stats" style="font-size:.8rem;color:var(--muted);margin-right:auto;"></span>
+          <button class="btn btn-secondary" id="btn-auto-match" style="font-size:.8rem;padding:6px 14px;">✨ مطابقة تلقائية</button>
+          <button class="btn btn-primary"   id="btn-confirm-mapping" disabled style="font-size:.8rem;padding:6px 14px;">✅ تأكيد الربط والمتابعة</button>
+        </div>
+
+        <div id="mapping-table-wrap" style="overflow-x:auto;margin-top:10px;">
+          <table class="map-table">
+            <thead>
+              <tr>
+                <th style="width:36px;"><input type="checkbox" id="chk-all" title="تحديد الكل" /></th>
+                <th>جدول المصدر (القديم)</th>
+                <th>عدد الصفوف</th>
+                <th>جدول الهدف (الجديد)</th>
+                <th>الأعمدة المشتركة</th>
+              </tr>
+            </thead>
+            <tbody id="mapping-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════════════════════
+         صفحة ٣ — النقل (جدول بجدول)
+         ════════════════════════════════════════════════════════════════ -->
+    <section class="page" id="page-migration">
+
+      <!-- رأس الخطوة الحالية -->
+      <div class="card" id="group-header-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <div>
+            <div style="font-size:.78rem;color:var(--muted);margin-bottom:2px;" id="group-counter">⏳ جارٍ التحميل...</div>
+            <div style="font-size:1.1rem;font-weight:900;" id="current-group-name"></div>
+            <div style="font-size:.8rem;color:var(--muted);margin-top:2px;" id="current-group-tables"></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;" id="group-rule-badges"></div>
+        </div>
+        <div style="margin-top:14px;">
+          <div id="groups-mini-stepper" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;"></div>
+        </div>
+      </div>
+
+      <!-- التقدم الحالي -->
+      <div class="card" id="progress-card" style="display:none;">
+        <div class="card-title" id="progress-group-name">⏳ جارٍ النقل...</div>
+        <div class="progress-wrap">
+          <div class="progress-label">
+            <span id="progress-table">—</span>
+            <span id="progress-pct">0%</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        </div>
+        <div class="speed-row">
+          <div class="speed-item"><div class="speed-num" id="speed-rps">—</div><div class="speed-lbl">سجل/ثانية</div></div>
+          <div style="width:1px;height:40px;background:var(--border);"></div>
+          <div class="speed-item"><div class="speed-num" id="speed-eta">—</div><div class="speed-lbl">الوقت المتبقي</div></div>
+        </div>
+        <div class="stats-row">
+          <div class="stats-box ins"><div class="big" id="live-inserted">0</div><div class="lbl">مُدرَج</div></div>
+          <div class="stats-box skp"><div class="big" id="live-skipped">0</div><div class="lbl">متخطى</div></div>
+          <div class="stats-box fai"><div class="big" id="live-failed">0</div><div class="lbl">فشل</div></div>
+        </div>
+      </div>
+
+      <!-- أزرار الإجراء -->
+      <div class="card" id="action-card">
+        <div id="action-msg" style="color:var(--muted);font-size:.88rem;margin-bottom:14px;"></div>
+        <div class="btn-row">
+          <button class="btn btn-primary"   id="btn-start-group">▶ بدء نقل هذا الجدول</button>
+          <button class="btn btn-danger"    id="btn-cancel"   style="display:none;">⛔ إيقاف</button>
+          <button class="btn btn-primary"   id="btn-next"     style="display:none;">التالي ← الجدول التالي</button>
+          <button class="btn btn-success"   id="btn-finish"   style="display:none;">✅ إنهاء وعرض الملخص</button>
+        </div>
+      </div>
+
+      <!-- سجل الأحداث -->
+      <div class="card">
+        <div class="card-title">📋 سجل الأحداث</div>
+        <div class="log-toolbar">
+          <input type="text" class="log-search" id="log-search" placeholder="بحث في السجل..." />
+          <div class="log-filter-btns">
+            <button class="log-filter-btn active-INFO"  data-level="INFO">INFO</button>
+            <button class="log-filter-btn active-WARN"  data-level="WARN">WARN</button>
+            <button class="log-filter-btn active-ERROR" data-level="ERROR">ERROR</button>
+            <button class="log-filter-btn active-SKIP"  data-level="SKIP">SKIP</button>
+          </div>
+          <span id="log-count" style="font-size:.75rem;color:var(--muted);">0 سجل</span>
+        </div>
+        <div class="log-box" id="log-box"></div>
+      </div>
+
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════════════════════
+         صفحة ٤ — الملخص
+         ════════════════════════════════════════════════════════════════ -->
+    <section class="page" id="page-summary">
+      <div class="summary-hero">
+        <div class="icon" id="summary-icon">✅</div>
+        <h2 id="summary-title">اكتمل النقل</h2>
+        <p id="summary-subtitle"></p>
+      </div>
+
+      <div class="stats-row" style="max-width:500px;margin:0 auto 20px;">
+        <div class="stats-box ins"><div class="big" id="sum-inserted">0</div><div class="lbl">إجمالي مُدرَج</div></div>
+        <div class="stats-box skp"><div class="big" id="sum-skipped">0</div><div class="lbl">إجمالي متخطى</div></div>
+        <div class="stats-box fai"><div class="big" id="sum-failed">0</div><div class="lbl">إجمالي فشل</div></div>
+      </div>
+
+      <div class="card" style="max-width:600px;margin:0 auto 16px;">
+        <div class="card-title">📊 تفاصيل الجداول المنقولة</div>
+        <div id="summary-groups"></div>
+      </div>
+
+      <div class="card" style="max-width:600px;margin:0 auto;">
+        <div class="card-title">📁 ملف السجل</div>
+        <p id="log-file-path" style="font-size:.8rem;color:var(--muted);word-break:break-all;margin-bottom:12px;">—</p>
+        <div class="btn-row">
+          <button class="btn btn-secondary" id="btn-export-log">💾 حفظ السجل...</button>
+          <button class="btn btn-secondary" id="btn-restart">🔄 نقل جديد</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

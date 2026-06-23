@@ -1,0 +1,43 @@
+{
+  "name": "laundry-migration-tool",
+  "version": "1.0.0",
+  "description": "أداة نقل البيانات من laundry_schema إلى laundry_db",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder --win --x64",
+    "build:dir": "electron-builder --win --x64 --dir",
+    "dist:win": "electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "com.laundry.migration",
+    "productName": "Laundry Migration Tool",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "files": [
+      "**/*",
+      "!**/*.dump",
+      "!dist",
+      "!*.md"
+    ]
+  },
+  "keywords": ["electron", "migration", "database", "mysql", "laundry"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "dependencies": {
+    "mysql2": "^3.6.5"
+  }
+}

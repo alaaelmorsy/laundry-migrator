@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام نقل بيانات المغسلة</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="wizard-container">
+        <header class="wizard-header">
+            <div class="header-content">
+                <div class="brand">
+                    <svg class="brand-icon" width="48" height="48" viewBox="0 0 48 48" fill="none">
+                        <rect width="48" height="48" rx="12" fill="url(#grad1)"/>
+                        <path d="M14 20c0-5.5 4.5-10 10-10s10 4.5 10 10c0 8-10 18-10 18S14 28 14 20z" stroke="white" stroke-width="2.5" fill="none"/>
+                        <circle cx="24" cy="20" r="3" fill="white"/>
+                        <defs>
+                            <linearGradient id="grad1" x1="0" y1="0" x2="48" y2="48">
+                                <stop offset="0%" stop-color="#0066FF"/>
+                                <stop offset="100%" stop-color="#0052CC"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                    <div class="brand-text">
+                        <h1>نظام نقل بيانات المغسلة</h1>
+                        <p>Laundry Data Migration System</p>
+                    </div>
+                </div>
+                <div class="version-badge">v1.0.0</div>
+            </div>
+        </header>
+
+        <div class="stepper-container">
+            <div class="stepper">
+                <div class="step" data-step="0">
+                    <div class="step-indicator"><div class="step-number">1</div><div class="step-checkmark"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+                    <div class="step-label">الإعدادات</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="1">
+                    <div class="step-indicator"><div class="step-number">2</div><div class="step-checkmark"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+                    <div class="step-label">المغسلة</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="2">
+                    <div class="step-indicator"><div class="step-number">3</div><div class="step-checkmark"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+                    <div class="step-label">الخدمات</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="3">
+                    <div class="step-indicator"><div class="step-number">4</div><div class="step-checkmark"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+                    <div class="step-label">المنتجات</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="4">
+                    <div class="step-indicator"><div class="step-number">5</div><div class="step-checkmark"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+                    <div class="step-label">العملاء</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="5">
+                    <div class="step-indicator"><div class="step-number">6</div><div class="step-checkmark"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+                    <div class="step-label">المستخدمين</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="6">
+                    <div class="step-indicator"><div class="step-number">7</div><div class="step-checkmark"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+                    <div class="step-label">الاشتراكات</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="7">
+                    <div class="step-indicator"><div class="step-number">8</div><div class="step-checkmark"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+                    <div class="step-label">الفواتير</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="8">
+                    <div class="step-indicator"><div class="step-number">9</div><div class="step-checkmark"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+                    <div class="step-label">المصروفات</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="9">
+                    <div class="step-indicator"><div class="step-number">10</div><div class="step-checkmark"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+                    <div class="step-label">النسخ الاحتياطي</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="10">
+                    <div class="step-indicator"><div class="step-number">11</div><div class="step-checkmark"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+                    <div class="step-label">الانتهاء</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="wizard-content">
+
+            <!-- Step 0: Connection -->
+            <div class="step-content active" data-step-content="0">
+                <div class="step-card">
+                    <div class="step-icon-large">
+                        <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+                            <path d="M8 16h48M8 32h48M8 48h48M16 8v48M32 8v48M48 8v48" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                        </svg>
+                    </div>
+                    <h2 class="step-title">إعداد الاتصال بقواعد البيانات</h2>
+                    <p class="step-description">أدخل بيانات الاتصال بقاعدة البيانات القديمة (laundry_schema) وقاعدة البيانات الجديدة (laundry_db)</p>
+                    <div class="db-config-grid">
+                        <div class="db-config-card">
+                            <div class="config-header">
+                                <svg width="28" height="28" viewBox="0 0 28 28" fill="none"><circle cx="14" cy="14" r="12" stroke="currentColor" stroke-width="2"/><path d="M14 8v6l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                                <h3>قاعدة البيانات المصدر</h3>
+                            </div>
+                            <p style="color:var(--text-secondary);margin-bottom:16px;font-size:0.875rem;">النظام القديم (laundry_schema)</p>
+                            <div class="form-group"><label>الخادم (Host)</label><input type="text" id="source-host" value="127.0.0.1"></div>
+                            <div class="form-group"><label>اسم المستخدم</label><input type="text" id="source-user" value="root"></div>
+                            <div class="form-group"><label>كلمة المرور</label><input type="password" id="source-password" placeholder="كلمة المرور"></div>
+                            <div class="form-group"><label>اسم قاعدة البيانات</label><input type="text" id="source-database" value="laundry_schema"></div>
+                            <button class="btn-test" onclick="testSourceConnection()">
+                                <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 3v14M3 10h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                                اختبار الاتصال
+                            </button>
+                            <div id="source-status" class="connection-status"></div>
+                        </div>
+                        <div class="db-config-card">
+                            <div class="config-header">
+                                <svg width="28" height="28" viewBox="0 0 28 28" fill="none"><path d="M14 4l10 6v8l-10 6L4 18v-8l10-6z" stroke="currentColor" stroke-width="2"/></svg>
+                                <h3>قاعدة البيانات الهدف</h3>
+                            </div>
+                            <p style="color:var(--text-secondary);margin-bottom:16px;font-size:0.875rem;">النظام الجديد (laundry_db)</p>
+                            <div class="form-group"><label>الخادم (Host)</label><input type="text" id="target-host" value="127.0.0.1"></div>
+                            <div class="form-group"><label>اسم المستخدم</label><input type="text" id="target-user" value="root"></div>
+                            <div class="form-group"><label>كلمة المرور</label><input type="password" id="target-password" placeholder="كلمة المرور"></div>
+                            <div class="form-group"><label>اسم قاعدة البيانات</label><input type="text" id="target-database" value="laundry_db"></div>
+                            <button class="btn-test" onclick="testTargetConnection()">
+                                <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 3v14M3 10h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                                اختبار الاتصال
+                            </button>
+                            <div id="target-status" class="connection-status"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 1: Settings -->
+            <div class="step-content" data-step-content="1">
+                <div class="step-card">
+                    <div class="step-icon-large"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="10" stroke="currentColor" stroke-width="3"/><path d="M32 8v8M32 48v8M8 32h8M48 32h8M15 15l5.5 5.5M43.5 43.5L49 49M15 49l5.5-5.5M43.5 20.5L49 15" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></div>
+                    <h2 class="step-title">نقل إعدادات المغسلة</h2>
+                    <p class="step-description">نقل بيانات المغسلة الأساسية مثل الاسم والشعار ومعلومات الاتصال وإعدادات الضريبة</p>
+                    <p style="color:var(--text-secondary);text-align:center;margin-bottom:30px;font-size:0.9rem;">المصدر: <strong>laundry_info</strong> &larr; الهدف: <strong>app_settings</strong></p>
+                    <div class="progress-section" id="progress-settings"><div class="progress-bar-wrapper"><div class="progress-bar"><div class="progress-fill"></div></div><div class="progress-percentage">0%</div></div></div>
+                    <div class="log-section" id="log-settings"></div>
+                    <button class="btn-migrate" id="btn-settings" onclick="migrateSettings()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12l7 7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        بدء نقل إعدادات المغسلة
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 2: Services -->
+            <div class="step-content" data-step-content="2">
+                <div class="step-card">
+                    <div class="step-icon-large"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><rect x="8" y="16" width="48" height="32" rx="6" stroke="currentColor" stroke-width="3"/><path d="M8 28h48M20 16v32M44 16v32" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg></div>
+                    <h2 class="step-title">نقل خدمات الغسيل</h2>
+                    <p class="step-description">نقل أنواع العمليات (غسيل، كوي، تنظيف جاف، إلخ) إلى جدول الخدمات الجديد</p>
+                    <p style="color:var(--text-secondary);text-align:center;margin-bottom:30px;font-size:0.9rem;">المصدر: <strong>io_operations</strong> &larr; الهدف: <strong>laundry_services</strong></p>
+                    <div class="progress-section" id="progress-services"><div class="progress-bar-wrapper"><div class="progress-bar"><div class="progress-fill"></div></div><div class="progress-percentage">0%</div></div></div>
+                    <div class="log-section" id="log-services"></div>
+                    <button class="btn-migrate" id="btn-services" onclick="migrateServices()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12l7 7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        بدء نقل الخدمات
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 3: Products -->
+            <div class="step-content" data-step-content="3">
+                <div class="step-card">
+                    <div class="step-icon-large"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M32 8L8 20v24l24 12 24-12V20L32 8z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path d="M32 8v36M8 20l24 12 24-12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg></div>
+                    <h2 class="step-title">نقل أنواع الملابس</h2>
+                    <p class="step-description">نقل أنواع الملابس (ثوب، غترة، قميص، إلخ) إلى جدول المنتجات الجديد</p>
+                    <p style="color:var(--text-secondary);text-align:center;margin-bottom:30px;font-size:0.9rem;">المصدر: <strong>io_types</strong> &larr; الهدف: <strong>products</strong></p>
+                    <div class="image-folder-section" style="margin-bottom: 20px; padding: 15px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px;">
+                        <label style="display: block; margin-bottom: 10px; font-weight: bold; color: var(--text-color);">مجلد صور المنتجات في البرنامج القديم (اختياري)</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="text" id="image-folder-path" readonly placeholder="لم يتم تحديد مجلد" style="flex: 1; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: #fff; cursor: not-allowed;">
+                            <button class="btn-secondary" onclick="selectImageFolder()" style="padding: 10px 20px; white-space: nowrap;">
+                                اختيار المجلد
+                            </button>
+                        </div>
+                        <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 8px; margin-bottom: 0;">إذا قمت بتحديد المجلد، سيتم سحب الصور وربطها بالمنتجات الجديدة تلقائياً.</p>
+                    </div>
+                    <div class="progress-section" id="progress-products"><div class="progress-bar-wrapper"><div class="progress-bar"><div class="progress-fill"></div></div><div class="progress-percentage">0%</div></div></div>
+                    <div class="log-section" id="log-products"></div>
+                    <button class="btn-migrate" id="btn-products" onclick="migrateProducts()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12l7 7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        بدء نقل المنتجات
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 4: Customers -->
+            <div class="step-content" data-step-content="4">
+                <div class="step-card">
+                    <div class="step-icon-large"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="32" cy="20" r="12" stroke="currentColor" stroke-width="3"/><path d="M8 56c0-13.3 10.7-24 24-24s24 10.7 24 24" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></div>
+                    <h2 class="step-title">نقل بيانات العملاء</h2>
+                    <p class="step-description">نقل جميع بيانات العملاء بما فيها الاسم والجوال والعنوان ونقاط الولاء والخصومات</p>
+                    <p style="color:var(--text-secondary);text-align:center;margin-bottom:30px;font-size:0.9rem;">المصدر: <strong>io_customers</strong> &larr; الهدف: <strong>customers</strong></p>
+                    <div class="progress-section" id="progress-customers"><div class="progress-bar-wrapper"><div class="progress-bar"><div class="progress-fill"></div></div><div class="progress-percentage">0%</div></div></div>
+                    <div class="log-section" id="log-customers"></div>
+                    <button class="btn-migrate" id="btn-customers" onclick="migrateCustomers()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12l7 7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        بدء نقل العملاء
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 5: Users -->
+            <div class="step-content" data-step-content="5">
+                <div class="step-card">
+                    <div class="step-icon-large"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="24" cy="20" r="10" stroke="currentColor" stroke-width="3"/><path d="M4 52c0-11 9-20 20-20" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M44 32l4 4 8-8" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                    <h2 class="step-title">نقل بيانات المستخدمين</h2>
+                    <p class="step-description">نقل حسابات المستخدمين وكلمات المرور وصلاحياتهم (مدير / كاشير)</p>
+                    <p style="color:var(--text-secondary);text-align:center;margin-bottom:30px;font-size:0.9rem;">المصدر: <strong>io_users</strong> &larr; الهدف: <strong>users</strong></p>
+                    <div class="progress-section" id="progress-users"><div class="progress-bar-wrapper"><div class="progress-bar"><div class="progress-fill"></div></div><div class="progress-percentage">0%</div></div></div>
+                    <div class="log-section" id="log-users"></div>
+                    <button class="btn-migrate" id="btn-users" onclick="migrateUsers()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12l7 7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        بدء نقل المستخدمين
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 6: Subscriptions -->
+            <div class="step-content" data-step-content="6">
+                <div class="step-card">
+                    <div class="step-icon-large"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><rect x="8" y="12" width="48" height="40" rx="8" stroke="currentColor" stroke-width="3"/><path d="M8 26h48" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><path d="M20 12v14M44 12v14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><path d="M20 38l6 6 14-14" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                    <h2 class="step-title">نقل اشتراكات العملاء</h2>
+                    <p class="step-description">نقل أحدث اشتراك لكل عميل فقط — بدون تكرار، اشتراك واحد لكل عميل بآخر تاريخ</p>
+                    <p style="color:var(--text-secondary);text-align:center;margin-bottom:16px;font-size:0.9rem;">
+                        المصدر: <strong>io_customer_partnership</strong> &larr; الهدف: <strong>customer_subscriptions + subscription_periods</strong>
+                    </p>
+                    <div style="background:#E8F5E9;border:1px solid #A5D6A7;border-radius:8px;padding:12px 16px;margin-bottom:24px;color:#2E7D32;font-size:0.875rem;text-align:center;">
+                        ✓ يتم اختيار أحدث اشتراك لكل عميل تلقائياً بناءً على آخر تاريخ اشتراك
+                    </div>
+                    <div class="progress-section" id="progress-subscriptions"><div class="progress-bar-wrapper"><div class="progress-bar"><div class="progress-fill"></div></div><div class="progress-percentage">0%</div></div></div>
+                    <div class="log-section" id="log-subscriptions"></div>
+                    <button class="btn-migrate" id="btn-subscriptions" onclick="migrateSubscriptions()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12l7 7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        بدء نقل الاشتراكات
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 7: Orders -->
+            <div class="step-content" data-step-content="7">
+                <div class="step-card">
+                    <div class="step-icon-large"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><rect x="10" y="8" width="44" height="52" rx="6" stroke="currentColor" stroke-width="3"/><path d="M20 22h24M20 32h24M20 42h16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg></div>
+                    <h2 class="step-title">نقل الفواتير والبنود</h2>
+                    <p class="step-description">نقل جميع الفواتير وبنودها التفصيلية (الفواتير غير المحذوفة فقط)</p>
+                    <p style="color:var(--text-secondary);text-align:center;margin-bottom:16px;font-size:0.9rem;">المصدر: <strong>bills + bill_closes_types</strong> &larr; الهدف: <strong>orders + order_items</strong></p>
+                    <div style="background:#FFF3CD;border:1px solid #FFEAA7;border-radius:8px;padding:12px 16px;margin-bottom:24px;color:#856404;font-size:0.875rem;text-align:center;">
+                        ⚠️ هذه الخطوة قد تستغرق وقتاً أطول للكميات الكبيرة من الفواتير
+                    </div>
+                    <div class="progress-section" id="progress-orders"><div class="progress-bar-wrapper"><div class="progress-bar"><div class="progress-fill"></div></div><div class="progress-percentage">0%</div></div></div>
+                    <div class="log-section" id="log-orders"></div>
+                    <button class="btn-migrate" id="btn-orders" onclick="migrateOrders()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12l7 7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        بدء نقل الفواتير
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 8: Expenses -->
+            <div class="step-content" data-step-content="8">
+                <div class="step-card">
+                    <div class="step-icon-large"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="24" stroke="currentColor" stroke-width="3"/><path d="M32 18v28M22 24h14a6 6 0 010 12H22" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></div>
+                    <h2 class="step-title">نقل المصروفات</h2>
+                    <p class="step-description">نقل سجلات المصروفات والمشتريات إلى النظام الجديد</p>
+                    <p style="color:var(--text-secondary);text-align:center;margin-bottom:30px;font-size:0.9rem;">المصدر: <strong>burchases</strong> &larr; الهدف: <strong>expenses</strong></p>
+                    <div class="progress-section" id="progress-expenses"><div class="progress-bar-wrapper"><div class="progress-bar"><div class="progress-fill"></div></div><div class="progress-percentage">0%</div></div></div>
+                    <div class="log-section" id="log-expenses"></div>
+                    <button class="btn-migrate" id="btn-expenses" onclick="migrateExpenses()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12l7 7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        بدء نقل المصروفات
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 9: Backup -->
+            <div class="step-content" data-step-content="9">
+                <div class="step-card">
+                    <div class="step-icon-large"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M32 8v36M20 32l12 12 12-12" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 48v6a2 2 0 002 2h40a2 2 0 002-2v-6" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></div>
+                    <h2 class="step-title">النسخة الاحتياطية</h2>
+                    <p class="step-description">حفظ نسخة احتياطية من قاعدة البيانات الجديدة (laundry_db) بعد اكتمال النقل</p>
+                    <div class="progress-section" id="progress-backup"><div class="progress-bar-wrapper"><div class="progress-bar"><div class="progress-fill"></div></div><div class="progress-percentage">0%</div></div></div>
+                    <div class="log-section" id="log-backup"></div>
+                    <button class="btn-migrate" id="btn-backup" onclick="createBackup()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 4v12M8 12l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        حفظ النسخة الاحتياطية
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 10: Done -->
+            <div class="step-content" data-step-content="10">
+                <div class="step-card completion-card">
+                    <div class="completion-icon">
+                        <svg width="120" height="120" viewBox="0 0 120 120" fill="none">
+                            <circle cx="60" cy="60" r="56" fill="rgba(0,200,83,0.1)" stroke="#00C853" stroke-width="4"/>
+                            <path d="M36 60l16 16 32-32" stroke="#00C853" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <h2 class="completion-title">تم نقل البيانات بنجاح!</h2>
+                    <p class="completion-description">تم نقل جميع بيانات المغسلة إلى النظام الجديد. يمكنك الآن استخدام النظام الجديد.</p>
+                    <div class="completion-stats">
+                        <div class="completion-stat"><div class="stat-number">9</div><div class="stat-label">خطوات النقل</div></div>
+                        <div class="completion-stat"><div class="stat-number">✓</div><div class="stat-label">اكتمل النقل</div></div>
+                    </div>
+                    <button class="btn-finish" onclick="finishMigration()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        إغلاق البرنامج
+                    </button>
+                </div>
+            </div>
+
+        </div>
+
+        <footer class="wizard-footer">
+            <div class="nav-info" id="step-info">الخطوة 1 من 11</div>
+            <div class="nav-actions">
+                <button class="btn-nav btn-secondary" id="btn-previous" onclick="previousStep()" disabled>
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    السابق
+                </button>
+                <button class="btn-nav btn-skip" id="btn-skip" onclick="skipStep()" style="display:none;">تخطي</button>
+                <button class="btn-nav btn-primary" id="btn-next" onclick="nextStep()" disabled>
+                    التالي
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M7 4l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+            </div>
+        </footer>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+    <script src="renderer.js"></script>
+</body>
+</html>
