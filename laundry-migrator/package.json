@@ -1,6 +1,6 @@
 {
   "name": "laundry-migration-tool",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "أداة نقل البيانات من laundry_schema إلى laundry_db",
   "main": "main.js",
   "scripts": {

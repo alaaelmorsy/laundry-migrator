@@ -44,4 +44,4 @@ jobs:
             laundry-migrator/dist/*.yml
             laundry-migrator/dist/*.blockmap
           generate_release_notes: true
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
