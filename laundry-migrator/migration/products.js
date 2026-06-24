@@ -1,6 +1,7 @@
 const dbManager = require('./db');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 async function migrateProducts(sourceConfig, targetConfig, imageFolder, progressCallback) {
     let connected = false;
@@ -113,6 +114,7 @@ async function migrateProducts(sourceConfig, targetConfig, imageFolder, progress
         };
 
         const rows = [];
+        let imagesFound = 0, imagesMissing = 0;
         for (let index = 0; index < types.length; index++) {
             const t = types[index];
             let imageData = null;
@@ -175,11 +177,16 @@ async function migrateProducts(sourceConfig, targetConfig, imageFolder, progress
                     if (targetFilename) {
                         const imgPath = path.join(imageFolder, targetFilename);
                         if (fs.existsSync(imgPath)) {
-                            imageData = fs.readFileSync(imgPath);
+                            imageData = zlib.gzipSync(fs.readFileSync(imgPath), { level: 9 });
                             imageMime = getMime(targetFilename);
+                            imagesFound++;
                             console.log(`[products] ✓ صورة وُجدت: "${targetFilename}" للمنتج: "${t.type_name}" (type_icon: "${rawIcon}")`);
+                        } else {
+                            imagesMissing++;
+                            console.log(`[products] ✗ الملف غير موجود في المجلد: "${targetFilename}" للمنتج: "${t.type_name}"`);
                         }
                     } else {
+                        imagesMissing++;
                         console.log(`[products] ✗ لم تُوجد صورة للمنتج: "${t.type_name}" (type_icon: "${rawIcon}")`);
                     }
                 } catch (err) {
@@ -191,8 +198,13 @@ async function migrateProducts(sourceConfig, targetConfig, imageFolder, progress
             if (!imageData) {
                 const img = typeImages.find(i => i.type_id === t.type_id);
                 if (img) {
-                    imageData = img.image_data;
+                    const raw = img.image_data;
+                    // gzip-compress if not already compressed
+                    const first2 = raw && raw.length >= 2 ? raw[0].toString(16).padStart(2,'0') + raw[1].toString(16).padStart(2,'0') : '';
+                    imageData = (first2 === '1f8b') ? raw : zlib.gzipSync(raw, { level: 9 });
                     imageMime = img.image_type;
+                    imagesFound++;
+                    console.log(`[products] ✓ صورة من قاعدة البيانات: "${t.type_name}"`);
                 }
             }
 
@@ -233,14 +245,27 @@ async function migrateProducts(sourceConfig, targetConfig, imageFolder, progress
 
         await dbManager.commit();
 
+        const imageSummary = imagesMissing === 0
+            ? `جميع الصور (${imagesFound}) تم نقلها بنجاح`
+            : `صور: ${imagesFound} نُقلت ✓ — ${imagesMissing} لم تُوجد ✗`;
+
         progressCallback({
             step: 'products',
             percentage: 100,
-            message: `✓ تم نقل ${migrated} نوع ملابس بنجاح`,
-            type: 'success'
+            message: `✓ تم نقل ${migrated} نوع ملابس — ${imageSummary}`,
+            type: imagesMissing === 0 ? 'success' : 'warning'
         });
 
-        return { success: true, migrated };
+        if (imagesMissing > 0) {
+            progressCallback({
+                step: 'products',
+                percentage: 100,
+                message: `تحقق من Console لمعرفة أسماء المنتجات التي لم تُوجد صورها`,
+                type: 'warning'
+            });
+        }
+
+        return { success: true, migrated, imagesFound, imagesMissing };
 
     } catch (error) {
         try { await dbManager.rollback(); } catch (e) {}

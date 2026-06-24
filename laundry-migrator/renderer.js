@@ -241,7 +241,18 @@ async function selectImageFolder() {
         const result = await window.electronAPI.selectImageFolder();
         if (!result.canceled && result.path) {
             productsImageFolder = result.path;
-            document.getElementById('image-folder-path').value = result.path;
+            const input = document.getElementById('image-folder-path');
+            const hint  = document.getElementById('image-folder-hint');
+            const btn   = input.nextElementSibling;
+            input.value = result.path;
+            input.style.border = '2px solid #38a169';
+            input.style.background = '#f0fff4';
+            input.style.color = '#276749';
+            if (hint) {
+                hint.style.color = '#276749';
+                hint.textContent = '✓ تم تحديد المجلد — سيتم نقل الصور تلقائياً.';
+            }
+            if (btn) { btn.style.background = '#38a169'; btn.style.borderColor = '#38a169'; }
             showToast('تم تحديد مجلد الصور', 'success');
         }
     } catch (error) {
@@ -250,6 +261,15 @@ async function selectImageFolder() {
 }
 
 async function migrateProducts() {
+    if (!productsImageFolder) {
+        const proceed = confirm(
+            'لم تقم بتحديد مجلد الصور!\n\n' +
+            'بدون تحديد المجلد لن يتم نقل أي صورة للمنتجات.\n\n' +
+            'هل تريد المتابعة بدون صور؟\n' +
+            '(اضغط "إلغاء" لتحديد المجلد أولاً)'
+        );
+        if (!proceed) return;
+    }
     await runMigration('products', async (source, target) => {
         return await window.electronAPI.migrateProducts(source, target, productsImageFolder);
     });

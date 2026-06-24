@@ -270,7 +270,7 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
                                 credit,
                                 credit,
                                 sub.cust_partnership_id,
-                                'Migrated from legacy partnership record',
+                                `تفعيل باقة "${closestPkg.name}" — منقول من البيانات القديمة`,
                                 startDate
                             ]
                         );
