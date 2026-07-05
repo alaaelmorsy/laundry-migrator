@@ -21,6 +21,12 @@ function buildPackageCatalog(defaultValues) {
     }));
 }
 
+function toNumOrDefault(val, fallback) {
+    if (val === null || val === undefined || val === '') return fallback;
+    const n = parseFloat(val);
+    return Number.isNaN(n) ? fallback : n;
+}
+
 function pickClosestPackage(packages, paid) {
     let closestPkg = packages[0];
     let minDiff = Math.abs(paid - closestPkg.paid);
@@ -73,13 +79,7 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
             ORDER BY icp.cust_id
         `);
 
-        const total = latestSubs.length;
-        if (total === 0) {
-            progressCallback({ step: 'subscriptions', percentage: 100, message: 'لا توجد اشتراكات للنقل', type: 'info' });
-            return { success: true, migrated: 0 };
-        }
-
-        progressCallback({ step: 'subscriptions', percentage: 10, message: `تم العثور على ${total} اشتراك (أحدث اشتراك لكل عميل)...`, type: 'info' });
+        progressCallback({ step: 'subscriptions', percentage: 10, message: `تم العثور على ${latestSubs.length} اشتراك (أحدث اشتراك لكل عميل)...`, type: 'info' });
 
         const [customValues] = await sourceConn.execute(`
             SELECT customer_id, partnership_paid_value, partnership_purchasing_value
@@ -129,6 +129,25 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
             partnershipNoMap[customer.cust_id] = customer.cust_partnership_no;
         }
 
+        // Union of customers with a partnership record AND customers who only
+        // carry a subscription number (cust_partnership_no) but never had a
+        // matching io_customer_partnership row — both must be migrated.
+        const subMap = {};
+        for (const sub of latestSubs) {
+            subMap[sub.cust_id] = sub;
+        }
+        const allCustIds = Array.from(new Set([
+            ...latestSubs.map(s => s.cust_id),
+            ...Object.keys(partnershipNoMap).map(id => parseInt(id, 10))
+        ]));
+
+        const total = allCustIds.length;
+        if (total === 0) {
+            await dbManager.commit();
+            progressCallback({ step: 'subscriptions', percentage: 100, message: 'لا توجد اشتراكات للنقل', type: 'info' });
+            return { success: true, migrated: 0 };
+        }
+
         let migrated = 0;
         let invoicesMigrated = 0;
         let receiptsMigrated = 0;
@@ -136,18 +155,27 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
         let invoiceSeq = 1;
         const BATCH_SIZE = 500;
 
-        for (let i = 0; i < latestSubs.length; i += BATCH_SIZE) {
-            const batch = latestSubs.slice(i, i + BATCH_SIZE);
+        for (let i = 0; i < allCustIds.length; i += BATCH_SIZE) {
+            const batch = allCustIds.slice(i, i + BATCH_SIZE);
 
-            for (const sub of batch) {
-                const custId = sub.cust_id;
+            for (const custId of batch) {
+                // Customers with only a subscription number (no io_customer_partnership
+                // row) still need to be migrated, with a zero balance.
+                const sub = subMap[custId] || {
+                    cust_id: custId,
+                    cust_partnership_paid_value: 0,
+                    cust_partnership_value: 0,
+                    cust_partnership_date: null,
+                    partship_end_date: null,
+                    cust_partnership_id: null
+                };
                 const custom = customMap[custId];
                 const paid = custom
-                    ? (parseFloat(custom.partnership_paid_value) || defaultPaid)
-                    : (parseFloat(sub.cust_partnership_paid_value) || defaultPaid);
+                    ? toNumOrDefault(custom.partnership_paid_value, defaultPaid)
+                    : toNumOrDefault(sub.cust_partnership_paid_value, defaultPaid);
                 const credit = custom
-                    ? (parseFloat(custom.partnership_purchasing_value) || defaultCredit)
-                    : (parseFloat(sub.cust_partnership_value) || defaultCredit);
+                    ? toNumOrDefault(custom.partnership_purchasing_value, defaultCredit)
+                    : toNumOrDefault(sub.cust_partnership_value, defaultCredit);
 
                 const closestPkg = pickClosestPackage(packages, paid);
                 const packageId = closestPkg.id;

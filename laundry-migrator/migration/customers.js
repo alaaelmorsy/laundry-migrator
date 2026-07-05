@@ -52,8 +52,8 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
         const skippedLog      = [];   // collect messages to send to UI
 
         for (const c of customers) {
-            const name  = c.cust_name  || `عميل ${c.cust_id}`;
-            const phone = c.cust_mobile ? c.cust_mobile.trim() : '';
+            const phone = c.cust_mobile ? c.cust_mobile.trim().toLowerCase() : '';
+            const name  = c.cust_name || phone;
 
             // 1. Skip if no phone
             if (!phone) {
@@ -79,7 +79,7 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
             rows.push([
                 c.cust_id,
                 name,
-                phone,
+                phone,   // already normalized to lowercase
                 c.cust_vat_num || null,
                 c.address || '',
                 c.customer_city || '',
