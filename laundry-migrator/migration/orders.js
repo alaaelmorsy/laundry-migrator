@@ -174,7 +174,8 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
 
             const orderRows = normalizedOrders.map(order => ([
                 order.bill.bill_no,
-                String(order.bill.bill_no).padStart(6, '0'),
+                String(order.bill.bill_no),
+                order.bill.bill_no,
                 order.bill.cust_id || null,
                 order.subtotal,
                 order.discountAmount,
@@ -206,12 +207,12 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
             ]));
 
             const orderPlaceholders = orderRows.map(() =>
-                '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             ).join(', ');
 
             await targetConn.execute(
                 `INSERT INTO orders (
-                    id, order_number, customer_id, subtotal, discount_amount, vat_rate,
+                    id, order_number, invoice_seq, customer_id, subtotal, discount_amount, vat_rate,
                     vat_amount, total_amount, paid_amount, remaining_amount,
                     paid_cash, paid_card, payment_method, notes, created_by,
                     created_at, payment_status, paid_at, fully_paid_at, cleaning_date,
@@ -220,6 +221,8 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                     settled_by_subscription_period_id, customer_discount_amount
                 ) VALUES ${orderPlaceholders}
                 ON DUPLICATE KEY UPDATE
+                    order_number = VALUES(order_number),
+                    invoice_seq = VALUES(invoice_seq),
                     customer_id = VALUES(customer_id),
                     subtotal = VALUES(subtotal),
                     discount_amount = VALUES(discount_amount),
