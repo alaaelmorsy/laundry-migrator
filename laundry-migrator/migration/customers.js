@@ -157,7 +157,17 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
             type: 'success'
         });
 
-        return { success: true, migrated, skippedNoPhone, skippedDuplicate };
+        // --- نقل تخصيص الأسعار (customize_type_costs → customer_custom_prices) ---
+        let customPrices = { migrated: 0, skipped: 0 };
+        try {
+            customPrices = await migrateCustomPrices(sourceConn, targetConn, rows, progressCallback);
+        } catch (e) {
+            progressCallback({ step: 'customers', percentage: 100,
+                message: `تحذير: فشل نقل تخصيص الأسعار: ${e.message}`, type: 'warning' });
+        }
+
+        return { success: true, migrated, skippedNoPhone, skippedDuplicate,
+                 customPricesMigrated: customPrices.migrated, customPricesSkipped: customPrices.skipped };
 
     } catch (error) {
         progressCallback({
@@ -172,6 +182,77 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
             try { await dbManager.disconnect(); } catch (e) {}
         }
     }
+}
+
+// نقل تخصيص الأسعار الخاصة بالعملاء من الجدول القديم customize_type_costs
+// إلى جدول النظام الجديد customer_custom_prices
+async function migrateCustomPrices(sourceConn, targetConn, migratedCustomerRows, progressCallback) {
+    // تأكد من وجود الجدول في المصدر
+    const [tables] = await sourceConn.execute("SHOW TABLES LIKE 'customize_type_costs'");
+    if (tables.length === 0) {
+        return { migrated: 0, skipped: 0 };
+    }
+
+    progressCallback({ step: 'customers', percentage: 100,
+        message: 'جاري قراءة تخصيص الأسعار...', type: 'info' });
+
+    // ربط كل سطر تسعير بالمنتج والخدمة عبر io_types_operation
+    const [priceRows] = await sourceConn.execute(`
+        SELECT ctc.cust_id, ctc.type_cost,
+               ito.type_id, ito.operation_id
+        FROM customize_type_costs ctc
+        JOIN io_types_operation ito ON ito.io_types_operation_id = ctc.io_types_operation_id
+        WHERE ctc.cust_id IS NOT NULL
+          AND ctc.type_cost IS NOT NULL
+          AND ito.operation_id IS NOT NULL
+    `);
+
+    if (priceRows.length === 0) {
+        progressCallback({ step: 'customers', percentage: 100,
+            message: 'لا يوجد تخصيص أسعار للنقل', type: 'info' });
+        return { migrated: 0, skipped: 0 };
+    }
+
+    // استبعاد الأسعار الخاصة بعملاء تم تخطيهم (بدون جوال / جوال مكرر)
+    const migratedIds = new Set(migratedCustomerRows.map(r => r[0]));
+    const valid = [];
+    let skipped = 0;
+    for (const p of priceRows) {
+        if (migratedIds.has(p.cust_id)) {
+            valid.push([p.cust_id, p.type_id, p.operation_id, p.type_cost]);
+        } else {
+            skipped++;
+        }
+    }
+
+    if (valid.length === 0) {
+        progressCallback({ step: 'customers', percentage: 100,
+            message: `تخطي جميع تخصيصات الأسعار (${skipped}) لأن عملاءها لم يتم نقلهم`, type: 'warning' });
+        return { migrated: 0, skipped };
+    }
+
+    // 4 أعمدة لكل صف → دفعات آمنة ضمن حد 65535 placeholder
+    const BATCH_SIZE = 5000;
+    let inserted = 0;
+    for (let i = 0; i < valid.length; i += BATCH_SIZE) {
+        const batch = valid.slice(i, i + BATCH_SIZE);
+        const placeholders = Array(batch.length).fill('(?, ?, ?, ?)').join(', ');
+        await targetConn.query('START TRANSACTION');
+        await targetConn.execute(
+            `INSERT INTO customer_custom_prices (customer_id, product_id, laundry_service_id, custom_price)
+             VALUES ${placeholders}
+             ON DUPLICATE KEY UPDATE custom_price = VALUES(custom_price)`,
+            batch.flatMap(r => r)
+        );
+        await targetConn.query('COMMIT');
+        inserted += batch.length;
+    }
+
+    progressCallback({ step: 'customers', percentage: 100,
+        message: `✓ تم نقل ${inserted} تخصيص سعر` + (skipped > 0 ? ` | تخطي ${skipped} (عملاء غير منقولين)` : ''),
+        type: 'success' });
+
+    return { migrated: inserted, skipped };
 }
 
 module.exports = { migrateCustomers };
