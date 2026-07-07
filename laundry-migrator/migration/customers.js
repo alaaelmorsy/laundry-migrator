@@ -17,18 +17,39 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
 
         // Fast column check using SHOW COLUMNS (much faster than INFORMATION_SCHEMA)
         const [colRows] = await sourceConn.execute(`SHOW COLUMNS FROM io_customers`);
-        const columns = colRows.map(c => (c.Field || c.field || Object.values(c)[0]).toLowerCase());
+        const sourceColumns = colRows.map(c => c.Field || c.field || Object.values(c)[0]);
+        const columns = sourceColumns.map(c => String(c).toLowerCase());
+        const getSourceColumn = name => sourceColumns.find(c => String(c).toLowerCase() === name);
+        const quoteIdentifier = name => `\`${String(name).replace(/`/g, '``')}\``;
+        const formatSelectField = field => {
+            const source = quoteIdentifier(field.name);
+            return field.alias ? `${source} AS ${quoteIdentifier(field.alias)}` : source;
+        };
 
-        const selectFields = ['cust_id', 'cust_name', 'cust_mobile', 'cust_vat_num', 'cust_points', 'cust_general_discount', 'cust_is_blacklist'];
-        if (columns.includes('address'))           selectFields.push('address');
-        if (columns.includes('customer_city'))     selectFields.push('customer_city');
-        if (columns.includes('cust_remark'))       selectFields.push('cust_remark');
-        if (columns.includes('discount_type'))     selectFields.push('discount_type');
-        if (columns.includes('discount_end_date')) selectFields.push('discount_end_date');
+        const customerCodeColumn = getSourceColumn('cust-id') || getSourceColumn('cust_id');
+        if (!customerCodeColumn) {
+            throw new Error('لم يتم العثور على عمود كود العميل في المصدر: cust-id أو cust_id');
+        }
+
+        const selectFields = [
+            { name: 'cust_id' },
+            { name: customerCodeColumn, alias: 'customer_code_source' },
+            { name: 'cust_name' },
+            { name: 'cust_mobile' },
+            { name: 'cust_vat_num' },
+            { name: 'cust_points' },
+            { name: 'cust_general_discount' },
+            { name: 'cust_is_blacklist' }
+        ];
+        if (columns.includes('address'))           selectFields.push({ name: 'address' });
+        if (columns.includes('customer_city'))     selectFields.push({ name: 'customer_city' });
+        if (columns.includes('cust_remark'))       selectFields.push({ name: 'cust_remark' });
+        if (columns.includes('discount_type'))     selectFields.push({ name: 'discount_type' });
+        if (columns.includes('discount_end_date')) selectFields.push({ name: 'discount_end_date' });
 
         // Read all customers at once
         const [customers] = await sourceConn.execute(
-            `SELECT ${selectFields.join(', ')} FROM io_customers ORDER BY cust_id`
+            `SELECT ${selectFields.map(formatSelectField).join(', ')} FROM io_customers ORDER BY ${quoteIdentifier('cust_id')}`
         );
 
         const total = customers.length;
@@ -78,6 +99,7 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
 
             rows.push([
                 c.cust_id,
+                c.customer_code_source == null ? null : String(c.customer_code_source),
                 name,
                 phone,   // already normalized to lowercase
                 c.cust_vat_num || null,
@@ -114,11 +136,11 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
         // MySQL limit: 65535 max placeholders per prepared statement
         // 13 columns per row → max safe batch = 65535 ÷ 13 = 5041 rows
         const BATCH_SIZE = 5000;
-        const fullBatchPlaceholder = Array(BATCH_SIZE).fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())').join(', ');
+        const fullBatchPlaceholder = Array(BATCH_SIZE).fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())').join(', ');
 
         const INSERT_SQL = `
             INSERT INTO customers (
-                id, customer_name, phone, tax_number, address, city,
+                id, customer_code, customer_name, phone, tax_number, address, city,
                 notes, is_active, loyalty_points, discount_type, discount_value,
                 discount_expiry, created_at
             ) VALUES {PLACEHOLDERS}`;
@@ -130,7 +152,7 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
 
             const placeholders = (batch.length === BATCH_SIZE)
                 ? fullBatchPlaceholder
-                : Array(batch.length).fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())').join(', ');
+                : Array(batch.length).fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())').join(', ');
 
             await targetConn.query('START TRANSACTION');
             await targetConn.execute(

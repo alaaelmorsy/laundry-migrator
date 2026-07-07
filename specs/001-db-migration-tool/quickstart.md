@@ -85,6 +85,7 @@ npm run dev
 
 **Expected Outcome**
 - Only one target customer record is kept for that identity.
+- Each migrated customer preserves the old customer code in `customers.customer_code` from source `cust-id` or `cust_id`.
 - Duplicate rows are logged as skipped with a clear reason.
 
 ---
