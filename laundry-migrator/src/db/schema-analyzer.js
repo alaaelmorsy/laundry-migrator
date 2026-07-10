@@ -1,5 +1,6 @@
 'use strict'
 const { getSource, getTarget } = require('./connection-manager')
+const { definitionsFor } = require('../migration/specialized-registry')
 
 let _sourceDb = ''
 let _targetDb = ''
@@ -94,7 +95,34 @@ async function analyze() {
   const matchedTables = sourceTables.filter(t => t.existsInTarget)
   const tables        = matchedTables   // للتوافق مع buildGroups
 
-  return { tables, sourceTables, targetTables, skippedTables }
+  const migrationDefinitions = definitionsFor(
+    sourceTables.map(table => table.name),
+    targetTables.map(table => table.name)
+  )
+  const specializedBySource = new Map(migrationDefinitions.map(definition => [definition.sourceTable, definition]))
+
+  for (const table of sourceTables) {
+    const definition = specializedBySource.get(table.name)
+    if (definition) {
+      Object.assign(table, {
+        migrationId: definition.id,
+        labelAr: definition.labelAr,
+        migrationMode: definition.mode,
+        targetHint: definition.targetTables[0],
+        requiresImages: Boolean(definition.requiresImages),
+        requiresChildWrites: Boolean(definition.requiresChildWrites),
+        requiresDedup: Boolean(definition.requiresDedup),
+        requiresLatestOnly: Boolean(definition.requiresLatestOnly)
+      })
+    } else if (table.existsInTarget) {
+      table.migrationMode = 'direct-copy'
+      table.targetHint = table.name
+    } else {
+      table.migrationMode = 'skipped'
+    }
+  }
+
+  return { tables, sourceTables, targetTables, skippedTables, migrationDefinitions }
 }
 
 async function analyzeTargetColumns(tableName) {

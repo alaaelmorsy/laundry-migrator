@@ -40,9 +40,9 @@ function register(ipcMain) {
   })
 
   ipcMain.handle('db:analyze', async () => {
-    const { tables, sourceTables, targetTables, skippedTables } = await schema.analyze()
+    const { tables, sourceTables, targetTables, skippedTables, migrationDefinitions } = await schema.analyze()
     const groups = buildGroups(tables)
-    return { groups, sourceTables, targetTables, skippedTables }
+    return { groups, sourceTables, targetTables, skippedTables, migrationDefinitions }
   })
 }
 

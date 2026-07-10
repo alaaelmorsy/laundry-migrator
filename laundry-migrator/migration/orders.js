@@ -9,8 +9,31 @@ function normalizePaymentBreakdown(bill, total, paymentMethod) {
     let paidCash = parseFloat(bill.paid_cash) || 0;
     let paidCard = parseFloat(bill.paid_card) || 0;
     const depositValue = parseFloat(bill.deposit_value) || 0;
-    const subscriptionConsumed = parseFloat(bill.current_part_value) || 0;
 
+    // In the legacy schema current_part_value is the customer's subscription
+    // balance AFTER the bill (a running balance, often negative when the
+    // customer overdrew) — NOT the amount this bill consumed. The consumed
+    // amount for a subscription-settled bill is the bill total minus whatever
+    // was collected in cash/card.
+    const isSubscriptionSettlement = Boolean(bill.bill_is_partnership) || paymentMethod === 'subscription';
+    if (isSubscriptionSettlement) {
+        // Match the new app's POS behavior for subscription-settled orders:
+        // paid_amount = total, remaining = 0, status = paid; consumption is the
+        // part not covered by real cash/card.
+        const subscriptionConsumed = Math.max(0, total - paidCash - paidCard);
+        return {
+            paidCash,
+            paidCard,
+            paidAmount: total,
+            remainingAmount: 0,
+            paymentStatus: 'paid',
+            subscriptionConsumed,
+            depositValue,
+            isSubscriptionSettlement: true
+        };
+    }
+
+    const subscriptionConsumed = 0;
     let paidAmount = 0;
     if (bill.bill_is_paid) {
         paidAmount = total;
@@ -32,7 +55,8 @@ function normalizePaymentBreakdown(bill, total, paymentMethod) {
 
     const settledTotal = paidAmount + subscriptionConsumed;
     const remainingAmount = Math.max(0, total - settledTotal);
-    const paymentStatus = remainingAmount <= 0 ? 'paid' : (settledTotal > 0 ? 'partial' : 'unpaid');
+    // The new app only recognizes 'pending'/'partial'/'paid' — never 'unpaid'.
+    const paymentStatus = remainingAmount <= 0 ? 'paid' : (settledTotal > 0 ? 'partial' : 'pending');
 
     return {
         paidCash,
@@ -41,7 +65,8 @@ function normalizePaymentBreakdown(bill, total, paymentMethod) {
         remainingAmount,
         paymentStatus,
         subscriptionConsumed,
-        depositValue
+        depositValue,
+        isSubscriptionSettlement: false
     };
 }
 
@@ -118,6 +143,12 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
              ORDER BY bct.bill_no`
         );
 
+        // Customers skipped during customer migration (e.g. no phone) don't exist
+        // in the target — their bills must migrate with customer_id = NULL to
+        // avoid FK failures.
+        const [targetCustomerRows] = await targetConn.execute(`SELECT id FROM customers`);
+        const targetCustomerIds = new Set(targetCustomerRows.map(r => r.id));
+
         const [subscriptionPeriods] = await targetConn.execute(`
             SELECT sp.id, sp.period_from, sp.period_to, cs.customer_id
             FROM subscription_periods sp
@@ -151,19 +182,24 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                 const totalAmount = parseFloat(bill.bill_total) || subtotal - discountAmount;
                 const paymentMethod = mapPaymentMethod(bill.payment_method);
                 const billDate = bill.bill_date || new Date();
-                const matchedPeriod = findMatchingPeriod(subscriptionPeriodLookup, bill.cust_id || null, billDate);
+                const custId = bill.cust_id && targetCustomerIds.has(bill.cust_id) ? bill.cust_id : null;
+                const matchedPeriod = findMatchingPeriod(subscriptionPeriodLookup, custId, billDate);
 
                 const payment = normalizePaymentBreakdown(bill, totalAmount, paymentMethod);
-                const isSubscriptionSettlement = payment.subscriptionConsumed > 0
-                    || Boolean(bill.bill_is_partnership)
-                    || paymentMethod === 'subscription';
+                const isSubscriptionSettlement = payment.isSubscriptionSettlement;
+                // Legacy subscription bills are real tax invoices (they carry VAT and
+                // an invoice number), so never mark them consumption-only — the new
+                // app hides is_consumption_only=1 rows from every invoice screen.
+                const isConsumptionOnly = false;
 
                 normalizedOrders.push({
                     bill,
+                    custId,
                     billDate,
                     paymentMethod,
                     matchedPeriod,
                     isSubscriptionSettlement,
+                    isConsumptionOnly,
                     subtotal,
                     discountAmount,
                     vatAmount,
@@ -176,7 +212,7 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                 order.bill.bill_no,
                 String(order.bill.bill_no),
                 order.bill.bill_no,
-                order.bill.cust_id || null,
+                order.custId,
                 order.subtotal,
                 order.discountAmount,
                 15.00,
@@ -198,9 +234,9 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                 parseFloat(order.bill.bill_extra) || 0,
                 order.isSubscriptionSettlement ? 'subscription' : 'migration',
                 order.bill.bill_no,
-                order.isSubscriptionSettlement ? (order.payment.paidAmount === 0 && order.payment.subscriptionConsumed > 0 ? 'subscription_renewal' : 'pos') : 'pos',
+                'pos',
                 order.matchedPeriod ? order.matchedPeriod.id : null,
-                order.payment.paidAmount === 0 && order.payment.subscriptionConsumed > 0 ? 1 : 0,
+                order.isConsumptionOnly ? 1 : 0,
                 order.payment.subscriptionConsumed,
                 order.isSubscriptionSettlement ? (order.matchedPeriod ? order.matchedPeriod.id : null) : null,
                 parseFloat(order.bill.bill_general_discount) || 0
@@ -305,7 +341,7 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                     ]);
                 }
 
-                if (order.payment.paidCash === 0 && order.payment.paidCard === 0 && order.payment.paidAmount > 0) {
+                if (!order.isSubscriptionSettlement && order.payment.paidCash === 0 && order.payment.paidCard === 0 && order.payment.paidAmount > 0) {
                     paymentRows.push([
                         order.bill.bill_no,
                         order.payment.paidAmount,
@@ -333,12 +369,14 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                 migratedItems += itemRows.length;
             }
 
+            // Always clear previously migrated payments (a re-run may have fewer
+            // payment rows than the last run, e.g. after fixing fake cash rows).
+            const deletePaymentPlaceholders = orderIds.map(() => '?').join(', ');
+            await targetConn.execute(
+                `DELETE FROM invoice_payments WHERE order_id IN (${deletePaymentPlaceholders})`,
+                orderIds
+            );
             if (paymentRows.length > 0) {
-                const deletePaymentPlaceholders = orderIds.map(() => '?').join(', ');
-                await targetConn.execute(
-                    `DELETE FROM invoice_payments WHERE order_id IN (${deletePaymentPlaceholders})`,
-                    orderIds
-                );
                 const paymentPlaceholders = paymentRows.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
                 await targetConn.execute(
                     `INSERT INTO invoice_payments

@@ -3,6 +3,8 @@ const mysql = require('mysql2/promise')
 
 let sourcePool = null
 let targetPool = null
+let sourceConfig = null
+let targetConfig = null
 
 async function testConnection(cfg) {
   let conn
@@ -42,10 +44,16 @@ function initPools(src, tgt) {
 
   sourcePool = mysql.createPool(poolOpts(src))
   targetPool = mysql.createPool(poolOpts(tgt))
+  sourceConfig = { ...src }
+  targetConfig = { ...tgt }
 }
 
 function getSource() { return sourcePool }
 function getTarget() { return targetPool }
+function getConfigs() {
+  if (!sourceConfig || !targetConfig) throw new Error('يجب تهيئة اتصالي المصدر والهدف أولاً')
+  return { sourceConfig: { ...sourceConfig }, targetConfig: { ...targetConfig } }
+}
 
 async function closePools() {
   await Promise.all([
@@ -54,6 +62,8 @@ async function closePools() {
   ])
   sourcePool = null
   targetPool = null
+  sourceConfig = null
+  targetConfig = null
 }
 
-module.exports = { testConnection, initPools, getSource, getTarget, closePools }
+module.exports = { testConnection, initPools, getSource, getTarget, getConfigs, closePools }

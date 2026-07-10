@@ -30,73 +30,30 @@ function sendProgress(progress) {
 }
 
 function registerHandlers() {
-    ipcMain.handle('test-connection', async (_event, config) => {
-        return controller.testConnection(config);
-    });
-
-    ipcMain.handle('migrate-settings', async (_event, sourceConfig, targetConfig) => {
-        return controller.migrateSettings(sourceConfig, targetConfig, sendProgress);
-    });
-
-    ipcMain.handle('migrate-services', async (_event, sourceConfig, targetConfig) => {
-        return controller.migrateServices(sourceConfig, targetConfig, sendProgress);
-    });
-
-    ipcMain.handle('migrate-products', async (_event, sourceConfig, targetConfig, imageFolder) => {
-        return controller.migrateProducts(sourceConfig, targetConfig, imageFolder, sendProgress);
-    });
-
-    ipcMain.handle('migrate-customers', async (_event, sourceConfig, targetConfig) => {
-        return controller.migrateCustomers(sourceConfig, targetConfig, sendProgress);
-    });
-
-    ipcMain.handle('migrate-users', async (_event, sourceConfig, targetConfig) => {
-        return controller.migrateUsers(sourceConfig, targetConfig, sendProgress);
-    });
-
-    ipcMain.handle('migrate-subscriptions', async (_event, sourceConfig, targetConfig) => {
-        return controller.migrateSubscriptions(sourceConfig, targetConfig, sendProgress);
-    });
-
-    ipcMain.handle('migrate-orders', async (_event, sourceConfig, targetConfig) => {
-        return controller.migrateOrders(sourceConfig, targetConfig, sendProgress);
-    });
-
-    ipcMain.handle('migrate-expenses', async (_event, sourceConfig, targetConfig) => {
-        return controller.migrateExpenses(sourceConfig, targetConfig, sendProgress);
-    });
+    ipcMain.handle('test-connection', async (_event, config) => controller.testConnection(config));
+    ipcMain.handle('migrate-settings', async (_event, source, target) => controller.migrateSettings(source, target, sendProgress));
+    ipcMain.handle('migrate-services', async (_event, source, target) => controller.migrateServices(source, target, sendProgress));
+    ipcMain.handle('migrate-products', async (_event, source, target, folder) => controller.migrateProducts(source, target, folder, sendProgress));
+    ipcMain.handle('migrate-customers', async (_event, source, target) => controller.migrateCustomers(source, target, sendProgress));
+    ipcMain.handle('migrate-users', async (_event, source, target) => controller.migrateUsers(source, target, sendProgress));
+    ipcMain.handle('migrate-subscriptions', async (_event, source, target) => controller.migrateSubscriptions(source, target, sendProgress));
+    ipcMain.handle('migrate-orders', async (_event, source, target) => controller.migrateOrders(source, target, sendProgress));
+    ipcMain.handle('migrate-expenses', async (_event, source, target) => controller.migrateExpenses(source, target, sendProgress));
 
     ipcMain.handle('select-image-folder', async () => {
-        const result = await dialog.showOpenDialog(mainWindow, {
-            properties: ['openDirectory']
-        });
-
-        return {
-            canceled: result.canceled,
-            path: result.canceled || !result.filePaths.length ? '' : result.filePaths[0]
-        };
+        const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
+        return { canceled: result.canceled, path: result.canceled || !result.filePaths.length ? '' : result.filePaths[0] };
     });
-
     ipcMain.handle('select-backup-location', async () => {
-        const result = await dialog.showOpenDialog(mainWindow, {
-            properties: ['openDirectory', 'createDirectory']
-        });
-
-        return {
-            canceled: result.canceled,
-            path: result.canceled || !result.filePaths.length ? '' : result.filePaths[0]
-        };
+        const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] });
+        return { canceled: result.canceled, path: result.canceled || !result.filePaths.length ? '' : result.filePaths[0] };
     });
-
-    ipcMain.handle('create-backup', async (_event, targetConfig, backupPath) => {
-        return controller.createDatabaseBackup(targetConfig, backupPath, sendProgress);
-    });
+    ipcMain.handle('create-backup', async (_event, target, backupPath) => controller.createDatabaseBackup(target, backupPath, sendProgress));
 }
 
 app.whenReady().then(() => {
     createWindow();
     registerHandlers();
-
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });

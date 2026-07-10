@@ -72,7 +72,7 @@ async function migrateTable(sourceTable, targetTable, colMap, filterFn, onProgre
             const vals = cols.map(c => row[c] ?? null)
             const ph   = cols.map(() => '?').join(', ')
             const [result] = await conn.execute(
-              `INSERT IGNORE INTO \`${tgtDB}\`.\`${targetTable}\` (${colSQL}) VALUES (${ph})`,
+              `INSERT INTO \`${tgtDB}\`.\`${targetTable}\` (${colSQL}) VALUES (${ph})`,
               vals
             )
             if (result && result.affectedRows > 0) batchInserted++

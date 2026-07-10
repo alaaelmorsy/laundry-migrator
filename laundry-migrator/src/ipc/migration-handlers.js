@@ -4,12 +4,63 @@ const { app } = require('electron')
 const { randomUUID } = require('crypto')
 const { migrateTable } = require('../db/batch-executor')
 const { LogWriter }   = require('../migration/log-writer')
+const { executeSpecialized } = require('../migration/specialized-executor')
 
 let abortController = null
 let logWriter       = null
 let sessionId       = ''
 
 function register(ipcMain, getWin) {
+
+  ipcMain.handle('migration:start-specialized', async (_event, request) => {
+    if (!sessionId) {
+      sessionId = randomUUID()
+      logWriter = new LogWriter(path.join(app.getPath('userData'), 'logs'), sessionId)
+    }
+    const win = getWin()
+    const emitProgress = ({ definition, legacyProgress }) => {
+      const entry = {
+        timestamp: new Date().toISOString(),
+        level: legacyProgress.type === 'error' ? 'ERROR' : legacyProgress.type === 'warning' ? 'WARN' : 'INFO',
+        table: definition.sourceTable,
+        rowId: '—',
+        message: legacyProgress.message
+      }
+      logWriter.write(entry)
+      win.webContents.send('migration:log', entry)
+      win.webContents.send('migration:progress', {
+        table: definition.labelAr,
+        processedRows: legacyProgress.percentage || 0,
+        totalRows: 100,
+        inserted: 0,
+        skipped: 0,
+        failed: entry.level === 'ERROR' ? 1 : 0,
+        rolledBack: 0,
+        rowsPerSecond: 0,
+        estimatedRemainingMs: 0
+      })
+    }
+
+    try {
+      const stats = await executeSpecialized(request, emitProgress)
+      win.webContents.send('migration:group-done', {
+        groupId: request.migrationId,
+        status: 'completed',
+        stats: { ...stats, rowsPerSecond: stats.durationMs ? Math.round(stats.inserted * 1000 / stats.durationMs) : 0 }
+      })
+      return { ok: true, sessionId, logFilePath: logWriter.filePath }
+    } catch (error) {
+      const entry = { timestamp: new Date().toISOString(), level: 'ERROR', table: request.migrationId, rowId: '—', message: error.message }
+      logWriter.write(entry)
+      win.webContents.send('migration:log', entry)
+      win.webContents.send('migration:group-done', {
+        groupId: request.migrationId,
+        status: 'failed',
+        stats: { attempted: 0, inserted: 0, skipped: 0, failed: 1, rolledBack: 0, durationMs: 0, rowsPerSecond: 0 }
+      })
+      throw error
+    }
+  })
 
   // نقل مجموعة (الطريقة القديمة — جداول بنفس الاسم)
   ipcMain.handle('migration:start', async (_e, group) => {

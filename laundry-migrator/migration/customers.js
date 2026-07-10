@@ -60,11 +60,6 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
 
         progressCallback({ step: 'customers', percentage: 10, message: `تم العثور على ${total} عميل، جاري تحضير الجدول...`, type: 'info' });
 
-        // Truncate target table first for maximum INSERT speed
-        await targetConn.query('START TRANSACTION');
-        await targetConn.query('DELETE FROM customers');
-        await targetConn.query('COMMIT');
-
         // --- Filter: skip no-phone & duplicate phones, log each case ---
         const rows = [];
         const seenPhones = new Set();
@@ -73,13 +68,14 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
         const skippedLog      = [];   // collect messages to send to UI
 
         for (const c of customers) {
-            const phone = c.cust_mobile ? c.cust_mobile.trim().toLowerCase() : '';
+            const rawPhone = c.cust_mobile ? String(c.cust_mobile).trim() : '';
+            const phone = rawPhone.replace(/[\s()+-]/g, '');
             const name  = c.cust_name || phone;
 
-            // 1. Skip if no phone
+            // 1. Skip if no phone — never migrate placeholder customers
             if (!phone) {
                 skippedNoPhone++;
-                skippedLog.push(`⚠ تخطي (بدون جوال): ${name} [ID: ${c.cust_id}]`);
+                skippedLog.push(`⚠ تخطي (بدون جوال): ${name || 'بدون اسم'} [ID: ${c.cust_id}]`);
                 continue;
             }
 
@@ -99,7 +95,8 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
 
             rows.push([
                 c.cust_id,
-                c.customer_code_source == null ? null : String(c.customer_code_source),
+                c.customer_code_source != null ? Number(c.customer_code_source) : c.cust_id,
+                null,
                 name,
                 phone,   // already normalized to lowercase
                 c.cust_vat_num || null,
@@ -134,16 +131,23 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
             message: `جاري نقل ${filteredTotal} عميل (تم تخطي ${skippedNoPhone + skippedDuplicate})...`, type: 'info' });
 
         // MySQL limit: 65535 max placeholders per prepared statement
-        // 13 columns per row → max safe batch = 65535 ÷ 13 = 5041 rows
-        const BATCH_SIZE = 5000;
-        const fullBatchPlaceholder = Array(BATCH_SIZE).fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())').join(', ');
+        // 14 columns per row → max safe batch = 65535 ÷ 14 = 4681 rows
+        const BATCH_SIZE = 4500;
+        const fullBatchPlaceholder = Array(BATCH_SIZE).fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())').join(', ');
 
         const INSERT_SQL = `
             INSERT INTO customers (
-                id, customer_code, customer_name, phone, tax_number, address, city,
+                id, customer_code, subscription_number, customer_name, phone, tax_number, address, city,
                 notes, is_active, loyalty_points, discount_type, discount_value,
                 discount_expiry, created_at
-            ) VALUES {PLACEHOLDERS}`;
+            ) VALUES {PLACEHOLDERS}
+            ON DUPLICATE KEY UPDATE
+                customer_code = VALUES(customer_code),
+                subscription_number = VALUES(subscription_number), customer_name = VALUES(customer_name),
+                phone = VALUES(phone), tax_number = VALUES(tax_number), address = VALUES(address),
+                city = VALUES(city), notes = VALUES(notes), is_active = VALUES(is_active),
+                loyalty_points = VALUES(loyalty_points), discount_type = VALUES(discount_type),
+                discount_value = VALUES(discount_value), discount_expiry = VALUES(discount_expiry)`;
 
         let migrated = 0;
 
@@ -152,7 +156,7 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
 
             const placeholders = (batch.length === BATCH_SIZE)
                 ? fullBatchPlaceholder
-                : Array(batch.length).fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())').join(', ');
+                : Array(batch.length).fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())').join(', ');
 
             await targetConn.query('START TRANSACTION');
             await targetConn.execute(

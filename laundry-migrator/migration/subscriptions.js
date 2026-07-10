@@ -104,6 +104,11 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
 
         await dbManager.beginTransaction();
 
+        // Customer migration cannot infer the real subscription number. Rebuild
+        // this field only from cust_partnership_no to avoid carrying customer IDs
+        // into the target's unique subscription_number column.
+        await targetConn.execute('UPDATE customers SET subscription_number = NULL');
+
         let packageSeq = 1;
         for (const pkg of packages) {
             const [insertResult] = await targetConn.execute(
@@ -136,10 +141,24 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
         for (const sub of latestSubs) {
             subMap[sub.cust_id] = sub;
         }
+        // Customers skipped during customer migration (e.g. no phone) don't exist
+        // in the target — creating subscriptions for them would violate the FK.
+        const [targetCustomerRows] = await targetConn.execute(`SELECT id FROM customers`);
+        const targetCustomerIds = new Set(targetCustomerRows.map(r => r.id));
+
         const allCustIds = Array.from(new Set([
             ...latestSubs.map(s => s.cust_id),
             ...Object.keys(partnershipNoMap).map(id => parseInt(id, 10))
-        ]));
+        ])).filter(id => {
+            if (targetCustomerIds.has(id)) return true;
+            progressCallback({
+                step: 'subscriptions',
+                percentage: 40,
+                message: `تحذير: تخطي اشتراك العميل ${id} لأن العميل غير منقول (بدون جوال أو مكرر)`,
+                type: 'warning'
+            });
+            return false;
+        });
 
         const total = allCustIds.length;
         if (total === 0) {
@@ -154,6 +173,7 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
         let ledgerEntriesMigrated = 0;
         let invoiceSeq = 1;
         const BATCH_SIZE = 500;
+        const subscriptionOwners = new Map();
 
         for (let i = 0; i < allCustIds.length; i += BATCH_SIZE) {
             const batch = allCustIds.slice(i, i + BATCH_SIZE);
@@ -183,9 +203,19 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
                 const endDate = sub.partship_end_date || null;
                 const startDate = sub.cust_partnership_date || new Date();
                 const partnershipNo = partnershipNoMap[custId];
-                const subRef = partnershipNo
-                    ? String(partnershipNo)
-                    : `SUB-${String(custId).padStart(6, '0')}`;
+                const legacyRef = partnershipNo ? String(partnershipNo) : null;
+                let subRef = legacyRef || `SUB-${String(custId).padStart(6, '0')}`;
+                const existingOwner = subscriptionOwners.get(subRef);
+                if (existingOwner && existingOwner !== custId) {
+                    subRef = `SUB-${String(custId).padStart(6, '0')}`;
+                    progressCallback({
+                        step: 'subscriptions',
+                        percentage: 40,
+                        message: `تحذير: رقم الاشتراك ${legacyRef} مكرر، تم استخدام ${subRef} للعميل ${custId}`,
+                        type: 'warning'
+                    });
+                }
+                subscriptionOwners.set(subRef, custId);
 
                 await targetConn.execute(
                     `INSERT INTO customer_subscriptions (customer_id, subscription_ref, current_package_id, end_date)
@@ -306,10 +336,10 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
                     }
                 }
 
-                if (partnershipNo) {
+                if (subRef) {
                     await targetConn.execute(
                         `UPDATE customers SET subscription_number = ? WHERE id = ?`,
-                        [String(partnershipNo), custId]
+                        [subRef, custId]
                     );
                 }
 

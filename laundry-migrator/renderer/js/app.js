@@ -203,7 +203,7 @@ function renderMappingTable(filterText = '') {
   const rows = state.mappings.filter(mapping => !filterText || mapping.srcTable.toLowerCase().includes(filterText.toLowerCase()))
   tbody.innerHTML = rows.map((mapping, visibleIndex) => {
     const inspected = mapping.colMap.length > 0
-    const disabled = mapping.mode === 'skipped'
+    const disabled = !['specialized', 'direct-copy'].includes(mapping.mode)
     const modeLabel = mapping.mode === 'specialized'
       ? 'مسار متخصص'
       : mapping.mode === 'direct-copy'
@@ -509,6 +509,9 @@ function onGroupDone(payload) {
 
   mapping.status = payload.status
   mapping.stats = payload.stats
+  for (const key of ['attempted', 'inserted', 'skipped', 'failed', 'rolledBack', 'durationMs']) {
+    state.totals[key] += Number(payload.stats[key]) || 0
+  }
   state.isRunning = false
   $('btn-cancel').style.display = 'none'
   $('progress-group-name').textContent = payload.status === 'completed' ? '✅ اكتمل النقل' : payload.status === 'partial' ? '⚠️ اكتمل جزئيًا' : '❌ فشل النقل'
