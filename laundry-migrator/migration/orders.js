@@ -70,6 +70,18 @@ function normalizePaymentBreakdown(bill, total, paymentMethod) {
     };
 }
 
+// Legacy bills contain zero/garbage dates that strict sql_mode would reject.
+// Cases: null, '0000-00-00', unparsable string, valid Date → Date or null.
+function toValidDate(value) {
+    if (!value) return null;
+    const parsed = value instanceof Date ? value : new Date(value);
+    return isNaN(parsed.getTime()) || parsed.getFullYear() < 1971 ? null : parsed;
+}
+
+// Deterministic fallback so re-runs produce identical created_at values
+// (previously `new Date()` changed on every run).
+const MISSING_DATE_FALLBACK = new Date('2000-01-01T00:00:00');
+
 function buildSubscriptionPeriodLookup(periods) {
     const byCustomer = new Map();
 
@@ -115,16 +127,26 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
 
         progressCallback({ step: 'orders', percentage: 0, message: 'جارٍ قراءة الفواتير...', type: 'info' });
 
+        // Older legacy schemas miss newer columns (paid_cash, bill_is_partnership,
+        // …). Select NULL for any missing column so the same normalization code
+        // works across every legacy version (same approach as products.js).
+        const [billColumns] = await sourceConn.execute(`SHOW COLUMNS FROM bills`);
+        const existingBillColumns = new Set(billColumns.map(c => c.Field || c.field || Object.values(c)[0]));
+        const wantedBillColumns = [
+            'bill_no', 'username', 'cust_id', 'bill_sum', 'bill_discount', 'bill_total',
+            'bill_date', 'bill_is_paid', 'bill_comment', 'bill_paid_date',
+            'bill_extra', 'payment_method', 'deposit_value', 'deposit_remain_value',
+            'is_deleted', 'bill_cleaned_date', 'bill_delivery_date', 'bill_notes',
+            'vat_part_value', 'offer_value', 'paid_cash', 'paid_card', 'bill_general_discount',
+            'is_urgent', 'bill_is_partnership', 'current_part_value'
+        ];
+        const billSelectList = wantedBillColumns
+            .map(col => existingBillColumns.has(col) ? col : `NULL AS ${col}`)
+            .join(', ');
+        const billWhereClause = existingBillColumns.has('is_deleted') ? 'WHERE is_deleted = 0' : '';
+
         const [bills] = await sourceConn.execute(
-            `SELECT bill_no, username, cust_id, bill_sum, bill_discount, bill_total,
-                    bill_date, bill_is_paid, bill_comment, bill_paid_date,
-                    bill_extra, payment_method, deposit_value, deposit_remain_value,
-                    is_deleted, bill_cleaned_date, bill_delivery_date, bill_notes,
-                    vat_part_value, offer_value, paid_cash, paid_card, bill_general_discount,
-                    is_urgent, bill_is_partnership, current_part_value
-             FROM bills
-             WHERE is_deleted = 0
-             ORDER BY bill_no`
+            `SELECT ${billSelectList} FROM bills ${billWhereClause} ORDER BY bill_no`
         );
 
         const total = bills.length;
@@ -134,6 +156,22 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
         }
 
         progressCallback({ step: 'orders', percentage: 5, message: `تم العثور على ${total} فاتورة، جارٍ قراءة بنود الفواتير...`, type: 'info' });
+
+        // Orders are inserted with explicit id = bill_no; a live order created by
+        // the new app inside that id range would be silently overwritten by
+        // ON DUPLICATE KEY UPDATE. Abort instead.
+        const minBillNo = bills[0].bill_no;
+        const maxBillNo = bills[bills.length - 1].bill_no;
+        const [[conflict]] = await targetConn.execute(
+            `SELECT COUNT(*) AS cnt FROM orders
+             WHERE id BETWEEN ? AND ? AND source NOT IN ('migration', 'subscription')`,
+            [minBillNo, maxBillNo]
+        );
+        if (conflict.cnt > 0) {
+            const message = `تعذر النقل: يوجد ${conflict.cnt} فاتورة أُنشئت من التطبيق الجديد بأرقام متعارضة مع الفواتير القديمة (${minBillNo}-${maxBillNo})`;
+            progressCallback({ step: 'orders', percentage: 0, message, type: 'error' });
+            return { success: false, error: message };
+        }
 
         const [billItems] = await sourceConn.execute(
             `SELECT bct.bill_no, bct.io_types_operation_id, bct.type_count, bct.type_total_cost,
@@ -170,6 +208,7 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
         let migratedOrders = 0;
         let migratedItems = 0;
         let paymentsMigrated = 0;
+        let expectedTotalCents = 0;
 
         for (let i = 0; i < bills.length; i += BATCH_SIZE) {
             const batch = bills.slice(i, i + BATCH_SIZE);
@@ -179,9 +218,12 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                 const subtotal = parseFloat(bill.bill_sum) || 0;
                 const discountAmount = parseFloat(bill.bill_discount) || 0;
                 const vatAmount = parseFloat(bill.vat_part_value) || 0;
-                const totalAmount = parseFloat(bill.bill_total) || subtotal - discountAmount;
+                // Round to 2dp before insert: legacy totals carry more decimals
+                // (VAT math) and the target DECIMAL(…,2) column would round them
+                // anyway, breaking the sum reconciliation against unrounded values.
+                const totalAmount = Math.round((parseFloat(bill.bill_total) || subtotal - discountAmount) * 100) / 100;
                 const paymentMethod = mapPaymentMethod(bill.payment_method);
-                const billDate = bill.bill_date || new Date();
+                const billDate = toValidDate(bill.bill_date) || toValidDate(bill.bill_paid_date) || MISSING_DATE_FALLBACK;
                 const custId = bill.cust_id && targetCustomerIds.has(bill.cust_id) ? bill.cust_id : null;
                 const matchedPeriod = findMatchingPeriod(subscriptionPeriodLookup, custId, billDate);
 
@@ -227,10 +269,10 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                 order.bill.username || null,
                 order.billDate,
                 order.payment.paymentStatus,
-                order.bill.bill_paid_date || null,
-                order.payment.paymentStatus === 'paid' ? (order.bill.bill_paid_date || order.billDate) : null,
-                order.bill.bill_cleaned_date || null,
-                order.bill.bill_delivery_date || null,
+                toValidDate(order.bill.bill_paid_date),
+                order.payment.paymentStatus === 'paid' ? (toValidDate(order.bill.bill_paid_date) || order.billDate) : null,
+                toValidDate(order.bill.bill_cleaned_date),
+                toValidDate(order.bill.bill_delivery_date),
                 parseFloat(order.bill.bill_extra) || 0,
                 order.isSubscriptionSettlement ? 'subscription' : 'migration',
                 order.bill.bill_no,
@@ -290,6 +332,7 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
             );
 
             migratedOrders += batch.length;
+            for (const order of normalizedOrders) expectedTotalCents += Math.round(order.totalAmount * 100);
 
             const itemRows = [];
             const paymentRows = [];
@@ -312,7 +355,7 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                     ]);
                 }
 
-                const paymentDate = order.bill.bill_paid_date || order.billDate;
+                const paymentDate = toValidDate(order.bill.bill_paid_date) || order.billDate;
                 const paymentNotes = order.bill.bill_notes || order.bill.bill_comment || 'Migrated payment';
 
                 if (order.payment.paidCash > 0) {
@@ -398,6 +441,47 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                 message: `تم نقل ${migratedOrders}/${total} فاتورة (${migratedItems} بند، ${paymentsMigrated} حركة دفع)...`,
                 type: 'info'
             });
+        }
+
+        // Reconciliation before commit: any mismatch between the source bills and
+        // what actually landed in the target rolls the whole migration back.
+        progressCallback({ step: 'orders', percentage: 96, message: 'جارٍ التحقق من مطابقة البيانات...', type: 'info' });
+
+        const [[targetAgg]] = await targetConn.execute(
+            `SELECT COUNT(*) AS cnt, COALESCE(SUM(total_amount), 0) AS total
+             FROM orders WHERE id BETWEEN ? AND ? AND source IN ('migration', 'subscription')`,
+            [minBillNo, maxBillNo]
+        );
+        const [[targetItemAgg]] = await targetConn.execute(
+            `SELECT COUNT(*) AS cnt FROM order_items oi
+             INNER JOIN orders o ON o.id = oi.order_id
+             WHERE o.id BETWEEN ? AND ? AND o.source IN ('migration', 'subscription')`,
+            [minBillNo, maxBillNo]
+        );
+        const [[targetPaymentAgg]] = await targetConn.execute(
+            `SELECT COUNT(*) AS cnt FROM invoice_payments ip
+             INNER JOIN orders o ON o.id = ip.order_id
+             WHERE o.id BETWEEN ? AND ? AND o.source IN ('migration', 'subscription')`,
+            [minBillNo, maxBillNo]
+        );
+
+        const mismatches = [];
+        if (Number(targetAgg.cnt) !== total) {
+            mismatches.push(`عدد الفواتير: المصدر ${total} / الهدف ${targetAgg.cnt}`);
+        }
+        const expectedTotalSum = expectedTotalCents / 100;
+        if (Math.abs(Number(targetAgg.total) - expectedTotalSum) > 0.01) {
+            mismatches.push(`مجموع الإجماليات: المتوقع ${expectedTotalSum.toFixed(2)} / الهدف ${Number(targetAgg.total).toFixed(2)}`);
+        }
+        if (Number(targetItemAgg.cnt) !== migratedItems) {
+            mismatches.push(`عدد البنود: المتوقع ${migratedItems} / الهدف ${targetItemAgg.cnt}`);
+        }
+        if (Number(targetPaymentAgg.cnt) !== paymentsMigrated) {
+            mismatches.push(`عدد حركات الدفع: المتوقع ${paymentsMigrated} / الهدف ${targetPaymentAgg.cnt}`);
+        }
+
+        if (mismatches.length > 0) {
+            throw new Error(`فشل التحقق من المطابقة، تم التراجع عن النقل بالكامل: ${mismatches.join(' | ')}`);
         }
 
         await dbManager.commit();

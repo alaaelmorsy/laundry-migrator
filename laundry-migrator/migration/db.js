@@ -39,9 +39,12 @@ class DatabaseManager {
             await this.targetConnection.query(`USE \`${targetConfig.database}\``);
 
             await this.targetConnection.query('SET autocommit=0');
-            await this.targetConnection.query('SET unique_checks=0');
             await this.targetConnection.query('SET foreign_key_checks=0');
-            await this.targetConnection.query("SET sql_mode=''");
+            // Strict mode makes bad legacy data fail loudly instead of being
+            // silently truncated/zeroed; ALLOW_INVALID_DATES keeps odd-but-formed
+            // legacy dates importable. unique_checks stays ON so InnoDB never
+            // skips secondary unique-index verification during bulk inserts.
+            await this.targetConnection.query("SET sql_mode='STRICT_TRANS_TABLES,ALLOW_INVALID_DATES,NO_ENGINE_SUBSTITUTION'");
             await this.targetConnection.query("SET time_zone='+03:00'");
 
             try {

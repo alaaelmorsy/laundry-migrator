@@ -228,7 +228,23 @@ async function migrateProducts(sourceConfig, targetConfig, imageFolder, progress
 
         if (typePrices.length > 0) {
             progressCallback({ step: 'products', percentage: 60, message: 'جاري نقل الأسعار...', type: 'info' });
-            const validPrices = typePrices.filter(p => p.operation_id != null);
+            // Legacy io_types_operation contains orphan rows (NULL type_id, or a
+            // type_id pointing at a deleted io_types row). Before strict sql_mode
+            // these were silently inserted as product_id = 0; now they must be
+            // excluded to only price products that actually migrated.
+            const migratedTypeIds = new Set(types.map(t => t.type_id));
+            const validPrices = typePrices.filter(p =>
+                p.operation_id != null && p.type_id != null && migratedTypeIds.has(p.type_id)
+            );
+            const skippedPrices = typePrices.length - validPrices.length;
+            if (skippedPrices > 0) {
+                progressCallback({
+                    step: 'products',
+                    percentage: 60,
+                    message: `تم تجاهل ${skippedPrices} سطر سعر يتيم (بدون منتج أو خدمة مرتبطة)`,
+                    type: 'warning'
+                });
+            }
             const priceRows = validPrices.map(p => [
                 p.type_id,
                 p.operation_id,
