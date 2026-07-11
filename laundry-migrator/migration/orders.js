@@ -355,15 +355,19 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                 }
             }
 
+            // Always clear previously migrated items first — order_items has no
+            // unique key on (order_id, product, service), so ON DUPLICATE KEY
+            // never fires and a re-run would duplicate every line item.
+            const deleteItemPlaceholders = orderIds.map(() => '?').join(', ');
+            await targetConn.execute(
+                `DELETE FROM order_items WHERE order_id IN (${deleteItemPlaceholders})`,
+                orderIds
+            );
             if (itemRows.length > 0) {
                 const itemPlaceholders = itemRows.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
                 await targetConn.execute(
                     `INSERT INTO order_items (order_id, product_id, laundry_service_id, quantity, unit_price, line_total)
-                     VALUES ${itemPlaceholders}
-                     ON DUPLICATE KEY UPDATE
-                        quantity = VALUES(quantity),
-                        unit_price = VALUES(unit_price),
-                        line_total = VALUES(line_total)`,
+                     VALUES ${itemPlaceholders}`,
                     itemRows.flatMap(row => row)
                 );
                 migratedItems += itemRows.length;
