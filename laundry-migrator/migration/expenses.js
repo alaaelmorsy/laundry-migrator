@@ -1,5 +1,16 @@
 const dbManager = require('./db');
 
+// Format as LOCAL calendar date — toISOString() converts to UTC and can shift
+// an expense near midnight to the previous/next day.
+function toLocalDateString(value) {
+    const date = value ? new Date(value) : new Date();
+    const safeDate = isNaN(date.getTime()) ? new Date() : date;
+    const year = safeDate.getFullYear();
+    const month = String(safeDate.getMonth() + 1).padStart(2, '0');
+    const day = String(safeDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
 async function migrateExpenses(sourceConfig, targetConfig, progressCallback) {
     let connected = false;
 
@@ -30,15 +41,16 @@ async function migrateExpenses(sourceConfig, targetConfig, progressCallback) {
 
         await dbManager.beginTransaction();
 
+        // Round to 2dp before insert: the target DECIMAL(…,2) columns round
+        // anyway, and un-rounded values make every re-run look like an update.
+        const round2 = value => Math.round((parseFloat(value) || 0) * 100) / 100;
         const rows = purchases.map(p => {
-            const amount = parseFloat(p.purchase_value) || 0;
+            const amount = round2(p.purchase_value);
             const isTaxable = p.is_vat_added ? 1 : 0;
             const taxRate = isTaxable ? 15.00 : 0;
-            const taxAmount = parseFloat(p.vat_value) || 0;
-            const totalAmount = amount + taxAmount;
-            const expenseDate = p.purchase_date
-                ? new Date(p.purchase_date).toISOString().split('T')[0]
-                : new Date().toISOString().split('T')[0];
+            const taxAmount = round2(p.vat_value);
+            const totalAmount = round2(amount + taxAmount);
+            const expenseDate = toLocalDateString(p.purchase_date);
 
             return [
                 p.purchase_id,
@@ -53,23 +65,28 @@ async function migrateExpenses(sourceConfig, targetConfig, progressCallback) {
             ];
         });
 
-        const migrated = await dbManager.batchInsert(
+        // Re-runs must refresh EVERY source-owned column — updating only a
+        // subset leaves stale tax/date/category values from the previous run.
+        const counters = await dbManager.batchInsert(
             'expenses',
             ['id', 'title', 'category', 'amount', 'is_taxable', 'tax_rate', 'tax_amount', 'total_amount', 'expense_date'],
             rows,
-            'title = VALUES(title), amount = VALUES(amount), total_amount = VALUES(total_amount)'
+            'title = VALUES(title), category = VALUES(category), amount = VALUES(amount), ' +
+            'is_taxable = VALUES(is_taxable), tax_rate = VALUES(tax_rate), tax_amount = VALUES(tax_amount), ' +
+            'total_amount = VALUES(total_amount), expense_date = VALUES(expense_date)'
         );
 
         await dbManager.commit();
 
+        const migrated = counters.inserted + counters.updated;
         progressCallback({
             step: 'expenses',
             percentage: 100,
-            message: `✓ تم نقل ${migrated} مصروف بنجاح`,
+            message: `✓ المصروفات: ${counters.inserted} جديد، ${counters.updated} محدث، ${counters.unchanged} بدون تغيير`,
             type: 'success'
         });
 
-        return { success: true, migrated };
+        return { success: true, migrated, ...counters };
 
     } catch (error) {
         try { await dbManager.rollback(); } catch (e) {}

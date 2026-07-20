@@ -48,7 +48,15 @@ function registerHandlers() {
         const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] });
         return { canceled: result.canceled, path: result.canceled || !result.filePaths.length ? '' : result.filePaths[0] };
     });
-    ipcMain.handle('create-backup', async (_event, target, backupPath) => controller.createDatabaseBackup(target, backupPath, sendProgress));
+    ipcMain.handle('create-backup', async (_event, target, backupPath) => {
+        // No path given → automatic backup into Documents without any dialog.
+        let resolvedPath = backupPath;
+        if (!resolvedPath) {
+            resolvedPath = path.join(app.getPath('documents'), 'laundry-migration-backups');
+            require('fs').mkdirSync(resolvedPath, { recursive: true });
+        }
+        return controller.createDatabaseBackup(target, resolvedPath, sendProgress);
+    });
 }
 
 app.whenReady().then(() => {

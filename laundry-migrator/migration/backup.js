@@ -1,4 +1,4 @@
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs').promises;
 const { existsSync } = require('fs');
@@ -67,11 +67,26 @@ async function createDatabaseBackup(config, backupPath, progressCallback) {
 
         progressCallback({ step: 'backup', percentage: 20, message: 'جاري تصدير قاعدة البيانات...', type: 'info' });
 
-        const password = config.password ? `-p"${config.password}"` : '';
-        const mysqldumpCmd = `"${mysqldumpPath}" -h ${config.host} -u ${config.user} ${password} --databases ${config.database} --result-file="${fullPath}"`;
+        // execFile with an args array: no shell, so the password never appears in
+        // a process command line and special characters in config values can't
+        // break or inject into the command. MYSQL_PWD keeps it out of argv too.
+        // --single-transaction gives a consistent InnoDB snapshot; routines/
+        // triggers/events make the dump actually restorable as a full database.
+        const dumpArgs = [
+            '-h', config.host,
+            '-P', String(config.port || 3306),
+            '-u', config.user,
+            '--single-transaction',
+            '--routines', '--triggers', '--events',
+            '--databases', config.database,
+            `--result-file=${fullPath}`
+        ];
 
         await new Promise((resolve, reject) => {
-            exec(mysqldumpCmd, { maxBuffer: 1024 * 1024 * 50 }, (error) => {
+            execFile(mysqldumpPath, dumpArgs, {
+                maxBuffer: 1024 * 1024 * 50,
+                env: { ...process.env, MYSQL_PWD: config.password || '' }
+            }, (error) => {
                 if (error) {
                     reject(new Error(`فشل تصدير قاعدة البيانات: ${error.message}`));
                     return;

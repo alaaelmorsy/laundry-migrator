@@ -47,7 +47,7 @@ async function migrateServices(sourceConfig, targetConfig, progressCallback) {
             1
         ]);
 
-        const migrated = await dbManager.batchInsert(
+        const counters = await dbManager.batchInsert(
             'laundry_services',
             ['id', 'name_ar', 'name_en', 'sort_order', 'is_active'],
             rows,
@@ -56,14 +56,15 @@ async function migrateServices(sourceConfig, targetConfig, progressCallback) {
 
         await dbManager.commit();
 
+        const migrated = counters.inserted + counters.updated;
         progressCallback({
             step: 'services',
             percentage: 100,
-            message: `✓ تم نقل ${migrated} خدمة غسيل بنجاح`,
+            message: `✓ الخدمات: ${counters.inserted} جديدة، ${counters.updated} محدثة، ${counters.unchanged} بدون تغيير`,
             type: 'success'
         });
 
-        return { success: true, migrated };
+        return { success: true, migrated, ...counters };
 
     } catch (error) {
         try { await dbManager.rollback(); } catch (e) {}

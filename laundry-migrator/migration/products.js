@@ -161,16 +161,22 @@ async function migrateProducts(sourceConfig, targetConfig, imageFolder, progress
                         if (match) targetFilename = match;
                     }
 
-                    // 5. Partial/substring match for Arabic name as last resort
+                    // 5. Partial/substring match for Arabic name as last resort —
+                    // accepted ONLY when exactly one file matches; an ambiguous
+                    // match would silently attach the wrong product image.
                     if (!targetFilename && t.type_name) {
                         const normalizedName = normalizeArabic(t.type_name.trim());
                         if (normalizedName.length >= 4) {
-                            const match = availableImages.find(f => {
+                            const matches = availableImages.filter(f => {
                                 const nameWithoutExt = normalizeArabic(path.parse(f).name);
                                 if (nameWithoutExt.length < 4) return false;
                                 return normalizedName.includes(nameWithoutExt) || nameWithoutExt.includes(normalizedName);
                             });
-                            if (match) targetFilename = match;
+                            if (matches.length === 1) {
+                                targetFilename = matches[0];
+                            } else if (matches.length > 1) {
+                                console.log(`[products] ⚠ تجاهل مطابقة غامضة (${matches.length} ملفات) للمنتج: "${t.type_name}"`);
+                            }
                         }
                     }
 
@@ -182,11 +188,9 @@ async function migrateProducts(sourceConfig, targetConfig, imageFolder, progress
                             imagesFound++;
                             console.log(`[products] ✓ صورة وُجدت: "${targetFilename}" للمنتج: "${t.type_name}" (type_icon: "${rawIcon}")`);
                         } else {
-                            imagesMissing++;
                             console.log(`[products] ✗ الملف غير موجود في المجلد: "${targetFilename}" للمنتج: "${t.type_name}"`);
                         }
                     } else {
-                        imagesMissing++;
                         console.log(`[products] ✗ لم تُوجد صورة للمنتج: "${t.type_name}" (type_icon: "${rawIcon}")`);
                     }
                 } catch (err) {
@@ -208,6 +212,13 @@ async function migrateProducts(sourceConfig, targetConfig, imageFolder, progress
                 }
             }
 
+            // Count "missing" exactly once per product, after BOTH sources were
+            // tried — counting inside the folder branch alone reported success
+            // when no folder was selected and the DB had no image either.
+            if (!imageData) {
+                imagesMissing++;
+            }
+
             rows.push([
                 t.type_id,
                 t.type_name || `منتج ${t.type_id}`,
@@ -219,12 +230,13 @@ async function migrateProducts(sourceConfig, targetConfig, imageFolder, progress
             ]);
         }
 
-        const migrated = await dbManager.batchInsert(
+        const productCounters = await dbManager.batchInsert(
             'products',
             ['id', 'name_ar', 'name_en', 'is_active', 'sort_order', 'image_blob', 'image_mime'],
             rows,
             'name_ar = VALUES(name_ar), name_en = VALUES(name_en), is_active = VALUES(is_active), sort_order = VALUES(sort_order), image_blob = VALUES(image_blob), image_mime = VALUES(image_mime)'
         );
+        const migrated = productCounters.inserted + productCounters.updated;
 
         if (typePrices.length > 0) {
             progressCallback({ step: 'products', percentage: 60, message: 'جاري نقل الأسعار...', type: 'info' });
@@ -261,9 +273,11 @@ async function migrateProducts(sourceConfig, targetConfig, imageFolder, progress
 
         await dbManager.commit();
 
-        const imageSummary = imagesMissing === 0
-            ? `جميع الصور (${imagesFound}) تم نقلها بنجاح`
-            : `صور: ${imagesFound} نُقلت ✓ — ${imagesMissing} لم تُوجد ✗`;
+        const imageSummary = (imagesFound === 0 && imagesMissing === 0)
+            ? 'لا توجد صور للنقل'
+            : (imagesMissing === 0
+                ? `جميع الصور (${imagesFound}) تم نقلها بنجاح`
+                : `صور: ${imagesFound} نُقلت ✓ — ${imagesMissing} لم تُوجد ✗`);
 
         progressCallback({
             step: 'products',

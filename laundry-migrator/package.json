@@ -1,6 +1,6 @@
 {
   "name": "laundry-migration-tool",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "أداة نقل البيانات من laundry_schema إلى laundry_db",
   "main": "main.js",
   "scripts": {
@@ -31,6 +31,7 @@
       "**/*",
       "!**/*.dump",
       "!dist",
+      "!_archive",
       "!*.md"
     ],
     "publish": [
@@ -46,7 +47,13 @@
     "type": "git",
     "url": "https://github.com/alaaelmorsy/laundry-migrator.git"
   },
-  "keywords": ["electron", "migration", "database", "mysql", "laundry"],
+  "keywords": [
+    "electron",
+    "migration",
+    "database",
+    "mysql",
+    "laundry"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
@@ -54,6 +61,7 @@
     "electron-builder": "^24.9.1"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "mysql2": "^3.6.5"
   }
 }

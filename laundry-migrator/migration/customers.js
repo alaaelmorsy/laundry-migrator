@@ -60,11 +60,25 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
 
         progressCallback({ step: 'customers', percentage: 10, message: `تم العثور على ${total} عميل، جاري تحضير الجدول...`, type: 'info' });
 
+        // Older target schemas don't have customers.customer_code — inserting it
+        // would fail the whole batch. Adapt the insert to the actual target schema.
+        const [targetColRows] = await targetConn.execute(`SHOW COLUMNS FROM customers`);
+        const targetHasCustomerCode = targetColRows
+            .map(c => c.Field || c.field || Object.values(c)[0])
+            .includes('customer_code');
+
+        // A phone already owned by a DIFFERENT id in the target would make
+        // ON DUPLICATE KEY UPDATE silently rewrite that row (unique phone key)
+        // while later steps keep looking up the source id — skip those instead.
+        const [targetPhoneRows] = await targetConn.execute(`SELECT id, phone FROM customers`);
+        const targetPhoneOwners = new Map(targetPhoneRows.map(r => [r.phone, r.id]));
+
         // --- Filter: skip no-phone & duplicate phones, log each case ---
         const rows = [];
         const seenPhones = new Set();
         let skippedNoPhone    = 0;
         let skippedDuplicate  = 0;
+        let skippedConflict   = 0;
         const skippedLog      = [];   // collect messages to send to UI
 
         for (const c of customers) {
@@ -86,6 +100,13 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
                 continue;
             }
 
+            const phoneOwner = targetPhoneOwners.get(phone);
+            if (phoneOwner !== undefined && phoneOwner !== c.cust_id) {
+                skippedConflict++;
+                skippedLog.push(`⚠ تخطي (الجوال ${phone} مملوك لعميل آخر في الهدف ID: ${phoneOwner}): ${name} [ID: ${c.cust_id}]`);
+                continue;
+            }
+
             seenPhones.add(phone);
 
             const loyaltyPoints = Math.round(parseFloat(c.cust_points) || 0);
@@ -93,9 +114,11 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
             const discountType  = discountValue ? 'percentage' : null;
             const isActive      = c.cust_is_blacklist ? 0 : 1;
 
-            rows.push([
-                c.cust_id,
-                c.customer_code_source != null ? Number(c.customer_code_source) : c.cust_id,
+            const row = [c.cust_id];
+            if (targetHasCustomerCode) {
+                row.push(c.customer_code_source != null ? Number(c.customer_code_source) : c.cust_id);
+            }
+            rows.push(row.concat([
                 null,
                 name,
                 phone,   // already normalized to lowercase
@@ -108,13 +131,13 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
                 discountType,
                 discountValue,
                 c.discount_end_date || null
-            ]);
+            ]));
         }
 
         // Send skip log to UI (batch to avoid flooding)
-        if (skippedNoPhone > 0 || skippedDuplicate > 0) {
+        if (skippedNoPhone > 0 || skippedDuplicate > 0 || skippedConflict > 0) {
             progressCallback({ step: 'customers', percentage: 15,
-                message: `تحذير: سيتم تخطي ${skippedNoPhone} عميل بدون جوال و${skippedDuplicate} عميل بجوال مكرر`, type: 'warning' });
+                message: `تحذير: سيتم تخطي ${skippedNoPhone} عميل بدون جوال و${skippedDuplicate} عميل بجوال مكرر و${skippedConflict} عميل بجوال متعارض مع الهدف`, type: 'warning' });
             // Log individual skipped entries (max 50 to avoid flooding)
             const logSample = skippedLog.slice(0, 50);
             for (const msg of logSample) {
@@ -131,23 +154,27 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
             message: `جاري نقل ${filteredTotal} عميل (تم تخطي ${skippedNoPhone + skippedDuplicate})...`, type: 'info' });
 
         // MySQL limit: 65535 max placeholders per prepared statement
-        // 14 columns per row → max safe batch = 65535 ÷ 14 = 4681 rows
+        // 13-14 columns per row → max safe batch = 65535 ÷ 14 = 4681 rows
+        const insertColumns = [
+            'id',
+            ...(targetHasCustomerCode ? ['customer_code'] : []),
+            'subscription_number', 'customer_name', 'phone', 'tax_number', 'address', 'city',
+            'notes', 'is_active', 'loyalty_points', 'discount_type', 'discount_value',
+            'discount_expiry'
+        ];
+        const rowPlaceholder = `(${Array(insertColumns.length).fill('?').join(', ')}, NOW())`;
+        const updateClause = insertColumns
+            .filter(col => col !== 'id')
+            .map(col => `${col} = VALUES(${col})`)
+            .join(', ');
+
         const BATCH_SIZE = 4500;
-        const fullBatchPlaceholder = Array(BATCH_SIZE).fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())').join(', ');
+        const fullBatchPlaceholder = Array(BATCH_SIZE).fill(rowPlaceholder).join(', ');
 
         const INSERT_SQL = `
-            INSERT INTO customers (
-                id, customer_code, subscription_number, customer_name, phone, tax_number, address, city,
-                notes, is_active, loyalty_points, discount_type, discount_value,
-                discount_expiry, created_at
-            ) VALUES {PLACEHOLDERS}
-            ON DUPLICATE KEY UPDATE
-                customer_code = VALUES(customer_code),
-                subscription_number = VALUES(subscription_number), customer_name = VALUES(customer_name),
-                phone = VALUES(phone), tax_number = VALUES(tax_number), address = VALUES(address),
-                city = VALUES(city), notes = VALUES(notes), is_active = VALUES(is_active),
-                loyalty_points = VALUES(loyalty_points), discount_type = VALUES(discount_type),
-                discount_value = VALUES(discount_value), discount_expiry = VALUES(discount_expiry)`;
+            INSERT INTO customers (${insertColumns.join(', ')}, created_at)
+            VALUES {PLACEHOLDERS}
+            ON DUPLICATE KEY UPDATE ${updateClause}`;
 
         let migrated = 0;
 
@@ -156,7 +183,7 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
 
             const placeholders = (batch.length === BATCH_SIZE)
                 ? fullBatchPlaceholder
-                : Array(batch.length).fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())').join(', ');
+                : Array(batch.length).fill(rowPlaceholder).join(', ');
 
             await targetConn.query('START TRANSACTION');
             await targetConn.execute(
@@ -179,20 +206,16 @@ async function migrateCustomers(sourceConfig, targetConfig, progressCallback) {
         progressCallback({
             step: 'customers',
             percentage: 100,
-            message: `✓ تم نقل ${migrated} عميل | تخطي ${skippedNoPhone} (بدون جوال) | تخطي ${skippedDuplicate} (جوال مكرر)`,
+            message: `✓ تم نقل ${migrated} عميل | تخطي ${skippedNoPhone} (بدون جوال) | تخطي ${skippedDuplicate} (جوال مكرر) | تخطي ${skippedConflict} (تعارض مع الهدف)`,
             type: 'success'
         });
 
-        // --- نقل تخصيص الأسعار (customize_type_costs → customer_custom_prices) ---
-        let customPrices = { migrated: 0, skipped: 0 };
-        try {
-            customPrices = await migrateCustomPrices(sourceConn, targetConn, rows, progressCallback);
-        } catch (e) {
-            progressCallback({ step: 'customers', percentage: 100,
-                message: `تحذير: فشل نقل تخصيص الأسعار: ${e.message}`, type: 'warning' });
-        }
+        // نقل تخصيص الأسعار (customize_type_costs → customer_custom_prices).
+        // فشل هذه الخطوة يفشل خطوة العملاء كلها — تحويله لتحذير سابقًا كان يعني
+        // ضياع أسعار العملاء الخاصة مع ظهور "نجاح" مضلل.
+        const customPrices = await migrateCustomPrices(sourceConn, targetConn, rows, progressCallback);
 
-        return { success: true, migrated, skippedNoPhone, skippedDuplicate,
+        return { success: true, migrated, skippedNoPhone, skippedDuplicate, skippedConflict,
                  customPricesMigrated: customPrices.migrated, customPricesSkipped: customPrices.skipped };
 
     } catch (error) {
@@ -237,6 +260,30 @@ async function migrateCustomPrices(sourceConn, targetConn, migratedCustomerRows,
         progressCallback({ step: 'customers', percentage: 100,
             message: 'لا يوجد تخصيص أسعار للنقل', type: 'info' });
         return { migrated: 0, skipped: 0 };
+    }
+
+    // المصدر يحتوي أسعارًا خاصة — بعض نسخ مخطط الهدف لا تتضمن الجدول بعد.
+    // يُنشأ هنا بنفس البنية التي يتوقعها التطبيق الجديد (مع مفتاح فريد يجعل
+    // إعادة التشغيل آمنة) بدلًا من إسقاط أسعار العملاء بصمت أو إيقاف النقل.
+    const [targetTables] = await targetConn.execute("SHOW TABLES LIKE 'customer_custom_prices'");
+    if (targetTables.length === 0) {
+        progressCallback({ step: 'customers', percentage: 100,
+            message: 'جدول customer_custom_prices غير موجود في الهدف — سيتم إنشاؤه الآن', type: 'info' });
+        await targetConn.query(`
+            CREATE TABLE customer_custom_prices (
+                id INT NOT NULL AUTO_INCREMENT,
+                customer_id INT NOT NULL,
+                product_id INT NOT NULL,
+                laundry_service_id INT NOT NULL,
+                custom_price DECIMAL(10,2) NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                UNIQUE KEY uq_ccp_customer_product_service (customer_id, product_id, laundry_service_id),
+                CONSTRAINT fk_ccp_customer FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE,
+                CONSTRAINT fk_ccp_product FOREIGN KEY (product_id) REFERENCES products (id),
+                CONSTRAINT fk_ccp_service FOREIGN KEY (laundry_service_id) REFERENCES laundry_services (id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
     }
 
     // استبعاد الأسعار الخاصة بعملاء تم تخطيهم (بدون جوال / جوال مكرر)

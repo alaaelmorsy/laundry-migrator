@@ -90,6 +90,32 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
             customMap[cv.customer_id] = cv;
         }
 
+        // In the legacy schema bills.current_part_value is the customer's
+        // subscription balance AFTER that bill (running balance). The latest
+        // partnership bill therefore carries the customer's real remaining
+        // balance — granting the full package value again would gift the
+        // customer money. Older source schemas miss these columns; fall back
+        // to the granted value there (no balance history exists to apply).
+        const [billColRows] = await sourceConn.execute(`SHOW COLUMNS FROM bills`);
+        const billColumns = new Set(billColRows.map(c => c.Field || c.field || Object.values(c)[0]));
+        const finalBalanceByCustomer = {};
+        if (billColumns.has('current_part_value') && billColumns.has('bill_is_partnership')) {
+            const [balanceRows] = await sourceConn.execute(`
+                SELECT b.cust_id, b.current_part_value, b.bill_date
+                FROM bills b
+                INNER JOIN (
+                    SELECT cust_id, MAX(bill_no) AS max_bill_no
+                    FROM bills
+                    WHERE current_part_value IS NOT NULL AND bill_is_partnership = 1
+                    GROUP BY cust_id
+                ) latest_bill
+                    ON b.cust_id = latest_bill.cust_id AND b.bill_no = latest_bill.max_bill_no
+            `);
+            for (const row of balanceRows) {
+                finalBalanceByCustomer[row.cust_id] = row;
+            }
+        }
+
         const [defaultValues] = await sourceConn.execute(`
             SELECT partnership_paid_value, partnership_purchasing_value
             FROM default_partnership_values
@@ -104,20 +130,32 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
 
         await dbManager.beginTransaction();
 
-        // Customer migration cannot infer the real subscription number. Rebuild
-        // this field only from cust_partnership_no to avoid carrying customer IDs
-        // into the target's unique subscription_number column.
-        await targetConn.execute('UPDATE customers SET subscription_number = NULL');
-
+        // prepaid_packages has no unique key on name — ON DUPLICATE never fires,
+        // so a plain upsert would create duplicate packages on every re-run.
+        // Look the package up by name explicitly instead.
         let packageSeq = 1;
         for (const pkg of packages) {
-            const [insertResult] = await targetConn.execute(
-                `INSERT INTO prepaid_packages (name_ar, prepaid_price, service_credit_value, duration_days, is_active, sort_order)
-                 VALUES (?, ?, ?, 30, 1, ?)
-                 ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`,
-                [pkg.name, pkg.paid, pkg.credit, packageSeq++]
+            const sortOrder = packageSeq++;
+            const [existingPkg] = await targetConn.execute(
+                `SELECT id FROM prepaid_packages WHERE name_ar = ? ORDER BY id LIMIT 1`,
+                [pkg.name]
             );
-            pkg.id = insertResult.insertId;
+            if (existingPkg.length > 0) {
+                pkg.id = existingPkg[0].id;
+                await targetConn.execute(
+                    `UPDATE prepaid_packages
+                     SET prepaid_price = ?, service_credit_value = ?, sort_order = ?
+                     WHERE id = ?`,
+                    [pkg.paid, pkg.credit, sortOrder, pkg.id]
+                );
+            } else {
+                const [insertResult] = await targetConn.execute(
+                    `INSERT INTO prepaid_packages (name_ar, prepaid_price, service_credit_value, duration_days, is_active, sort_order)
+                     VALUES (?, ?, ?, 30, 1, ?)`,
+                    [pkg.name, pkg.paid, pkg.credit, sortOrder]
+                );
+                pkg.id = insertResult.insertId;
+            }
         }
 
         await dbManager.commit();
@@ -160,6 +198,25 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
             return false;
         });
 
+        // Customer migration cannot infer the real subscription number; rebuild it
+        // from cust_partnership_no below. Clear stale numbers first — but only for
+        // customers that exist in the legacy source, inside this same transaction,
+        // so a failure later rolls the clearing back too and customers created by
+        // the new app are never touched.
+        const [sourceCustomerRows] = await sourceConn.execute(`SELECT cust_id FROM io_customers`);
+        const sourceCustomerIds = sourceCustomerRows
+            .map(r => r.cust_id)
+            .filter(id => targetCustomerIds.has(id));
+        const CLEAR_CHUNK = 5000;
+        for (let i = 0; i < sourceCustomerIds.length; i += CLEAR_CHUNK) {
+            const chunk = sourceCustomerIds.slice(i, i + CLEAR_CHUNK);
+            await targetConn.execute(
+                `UPDATE customers SET subscription_number = NULL
+                 WHERE subscription_number IS NOT NULL AND id IN (${chunk.map(() => '?').join(', ')})`,
+                chunk
+            );
+        }
+
         const total = allCustIds.length;
         if (total === 0) {
             await dbManager.commit();
@@ -171,7 +228,13 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
         let invoicesMigrated = 0;
         let receiptsMigrated = 0;
         let ledgerEntriesMigrated = 0;
-        let invoiceSeq = 1;
+        // invoice_seq has no unique constraint — restarting from 1 on every run
+        // would collide with numbers the new app already issued. Continue after
+        // the highest existing number instead.
+        const [[maxSeqRow]] = await targetConn.execute(
+            `SELECT COALESCE(MAX(invoice_seq), 0) AS max_seq FROM subscription_invoices`
+        );
+        let invoiceSeq = Number(maxSeqRow.max_seq) + 1;
         const BATCH_SIZE = 500;
         const subscriptionOwners = new Map();
 
@@ -202,6 +265,17 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
 
                 const endDate = sub.partship_end_date || null;
                 const startDate = sub.cust_partnership_date || new Date();
+
+                // Real remaining balance: the latest partnership bill's running
+                // balance, but only if that bill is not older than the current
+                // subscription (an older bill belongs to a previous package).
+                // Negative running balances (overdrawn customers) clamp to zero.
+                let creditRemaining = credit;
+                const balanceBill = finalBalanceByCustomer[custId];
+                if (balanceBill && sub.cust_partnership_date &&
+                    balanceBill.bill_date && new Date(balanceBill.bill_date) >= new Date(sub.cust_partnership_date)) {
+                    creditRemaining = Math.max(0, parseFloat(balanceBill.current_part_value) || 0);
+                }
                 const partnershipNo = partnershipNoMap[custId];
                 const legacyRef = partnershipNo ? String(partnershipNo) : null;
                 let subRef = legacyRef || `SUB-${String(custId).padStart(6, '0')}`;
@@ -234,35 +308,37 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
                 const actualSubId = existingSub.length > 0 ? existingSub[0].id : null;
 
                 if (actualSubId && packageId) {
-                    await targetConn.execute(
-                        `INSERT INTO subscription_periods
-                            (customer_subscription_id, package_id, period_from, period_to, prepaid_price_paid,
-                             credit_value_granted, credit_remaining, status)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                         ON DUPLICATE KEY UPDATE
-                            prepaid_price_paid = VALUES(prepaid_price_paid),
-                            credit_value_granted = VALUES(credit_value_granted),
-                            credit_remaining = VALUES(credit_remaining),
-                            status = VALUES(status)`,
-                        [
-                            actualSubId,
-                            packageId,
-                            startDate,
-                            endDate,
-                            paid,
-                            credit,
-                            credit,
-                            endDate && new Date(endDate) < new Date() ? 'expired' : 'active'
-                        ]
-                    );
+                    const periodStatus = endDate && new Date(endDate) < new Date() ? 'expired' : 'active';
 
+                    // subscription_periods has no unique key — ON DUPLICATE never
+                    // fires, so a plain upsert would duplicate the period (and its
+                    // invoice/receipt/ledger) on every re-run. Look it up first.
                     const [periodRows] = await targetConn.execute(
                         `SELECT id FROM subscription_periods
                          WHERE customer_subscription_id = ? AND package_id = ? AND period_from = ?
                          ORDER BY id DESC LIMIT 1`,
                         [actualSubId, packageId, startDate]
                     );
-                    const actualPeriodId = periodRows.length > 0 ? periodRows[0].id : null;
+                    let actualPeriodId = periodRows.length > 0 ? periodRows[0].id : null;
+
+                    if (actualPeriodId) {
+                        await targetConn.execute(
+                            `UPDATE subscription_periods
+                             SET period_to = ?, prepaid_price_paid = ?, credit_value_granted = ?,
+                                 credit_remaining = ?, status = ?
+                             WHERE id = ?`,
+                            [endDate, paid, credit, creditRemaining, periodStatus, actualPeriodId]
+                        );
+                    } else {
+                        const [periodInsert] = await targetConn.execute(
+                            `INSERT INTO subscription_periods
+                                (customer_subscription_id, package_id, period_from, period_to, prepaid_price_paid,
+                                 credit_value_granted, credit_remaining, status)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                            [actualSubId, packageId, startDate, endDate, paid, credit, creditRemaining, periodStatus]
+                        );
+                        actualPeriodId = periodInsert.insertId;
+                    }
 
                     if (actualPeriodId) {
                         const paymentMethod = 'cash';
@@ -333,6 +409,28 @@ async function migrateSubscriptions(sourceConfig, targetConfig, progressCallback
                             ]
                         );
                         ledgerEntriesMigrated++;
+
+                        // Keep the ledger consistent with the real balance: the
+                        // historical consumption is recorded as one aggregate
+                        // entry so the last balance_after equals credit_remaining.
+                        const consumedDelta = Number((credit - creditRemaining).toFixed(2));
+                        if (Math.abs(consumedDelta) >= 0.01) {
+                            await targetConn.execute(
+                                `INSERT INTO subscription_ledger
+                                    (subscription_period_id, entry_type, amount, balance_after, ref_type, ref_id, notes, created_at)
+                                 VALUES (?, ?, ?, ?, 'migration', ?, ?, ?)`,
+                                [
+                                    actualPeriodId,
+                                    consumedDelta > 0 ? 'consumption' : 'adjustment',
+                                    Math.abs(consumedDelta),
+                                    creditRemaining,
+                                    sub.cust_partnership_id,
+                                    'استهلاك تاريخي مجمع من فواتير النظام القديم',
+                                    startDate
+                                ]
+                            );
+                            ledgerEntriesMigrated++;
+                        }
                     }
                 }
 

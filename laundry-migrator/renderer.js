@@ -280,12 +280,31 @@ async function migrateSubscriptions()  { await runMigration('subscriptions',  wi
 async function migrateOrders()         { await runMigration('orders',         window.electronAPI.migrateOrders); }
 async function migrateExpenses()       { await runMigration('expenses',       window.electronAPI.migrateExpenses); }
 
+// Any migration step writes to the target database — a restorable backup taken
+// BEFORE the first write is the only way back if something goes wrong. The main
+// process refuses migration without it; this makes the flow explicit in the UI.
+async function ensureBackupBeforeMigration() {
+    if (migrationStatus.backup === 'completed') return true;
+    // Automatic and silent: saved to Documents/laundry-migration-backups
+    // without any dialog. The main process refuses migration without it.
+    showToast('جاري إنشاء نسخة احتياطية تلقائية من قاعدة الهدف...', 'info');
+    const result = await window.electronAPI.createBackup(targetConfig, null);
+    if (!result.success) {
+        showToast(`فشل النسخ الاحتياطي: ${result.error} — لن يبدأ النقل`, 'error');
+        return false;
+    }
+    migrationStatus.backup = 'completed';
+    showToast(`تم حفظ النسخة الاحتياطية تلقائيًا: ${result.filename}`, 'success');
+    return true;
+}
+
 async function runMigration(step, migrationFunction) {
     if (!sourceConfig || !targetConfig) {
         showToast('يرجى الاتصال بقواعد البيانات أولاً', 'error');
         goToStep(0);
         return;
     }
+    if (!(await ensureBackupBeforeMigration())) return;
     const progressBar = document.querySelector(`#progress-${step} .progress-fill`);
     const progressPercentage = document.querySelector(`[data-step-content="${currentStep}"] .progress-percentage`);
     const button = document.getElementById(`btn-${step}`);
@@ -395,6 +414,28 @@ async function createBackup() {
 }
 
 function finishMigration() {
+    // Approval gate: never let a failed or skipped step end as a "successful"
+    // migration without the user explicitly acknowledging what is missing.
+    const dataSteps = ['settings', 'services', 'products', 'customers', 'users', 'subscriptions', 'orders', 'expenses'];
+    const failed = dataSteps.filter(s => migrationStatus[s] === 'error');
+    const skipped = dataSteps.filter(s => migrationStatus[s] === 'skipped' || migrationStatus[s] === 'pending');
+
+    if (failed.length > 0) {
+        alert(
+            'لا يمكن اعتماد النقل: الخطوات التالية فشلت:\n\n' +
+            failed.map(getStepDisplayName).join('، ') +
+            '\n\nأعد تشغيل هذه الخطوات بنجاح قبل الإنهاء.'
+        );
+        return;
+    }
+    if (skipped.length > 0) {
+        const acknowledge = confirm(
+            'تحذير: الخطوات التالية لم تُنقل (تم تخطيها أو لم تُشغّل):\n\n' +
+            skipped.map(getStepDisplayName).join('، ') +
+            '\n\nبياناتها لن تكون موجودة في النظام الجديد. هل تؤكد الإنهاء رغم ذلك؟'
+        );
+        if (!acknowledge) return;
+    }
     if (confirm('هل تريد إغلاق البرنامج؟')) window.close();
 }
 

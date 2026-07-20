@@ -9,6 +9,7 @@ function normalizePaymentBreakdown(bill, total, paymentMethod) {
     let paidCash = parseFloat(bill.paid_cash) || 0;
     let paidCard = parseFloat(bill.paid_card) || 0;
     const depositValue = parseFloat(bill.deposit_value) || 0;
+    const depositRemain = parseFloat(bill.deposit_remain_value) || 0;
 
     // In the legacy schema current_part_value is the customer's subscription
     // balance AFTER the bill (a running balance, often negative when the
@@ -43,18 +44,31 @@ function normalizePaymentBreakdown(bill, total, paymentMethod) {
         paidAmount = depositValue;
     }
 
+    // Unpaid bill with a stored remaining amount: the legacy remain field is the
+    // truth for the customer's outstanding debt. Without it, a deposit >= total
+    // would compute remaining = 0 and silently flip the bill to 'paid'.
+    let remainingOverride = null;
+    if (!bill.bill_is_paid && depositRemain > 0) {
+        remainingOverride = Math.min(depositRemain, total);
+        paidAmount = Math.max(0, total - remainingOverride);
+    }
+
+    // Only fabricate a cash/card split for actual cash/card methods. Credit and
+    // bank-transfer bills keep paidCash/paidCard = 0 so cash-drawer and card
+    // reports are never inflated with invented amounts.
     if (paidAmount > 0 && paidCash === 0 && paidCard === 0) {
         if (paymentMethod === 'card') paidCard = paidAmount;
         else if (paymentMethod === 'cash') paidCash = paidAmount;
-        else paidCash = paidAmount;
     }
 
-    if (paidCash + paidCard > 0) {
+    if (remainingOverride === null && paidCash + paidCard > 0) {
         paidAmount = paidCash + paidCard;
     }
 
     const settledTotal = paidAmount + subscriptionConsumed;
-    const remainingAmount = Math.max(0, total - settledTotal);
+    const remainingAmount = remainingOverride !== null
+        ? remainingOverride
+        : Math.max(0, total - settledTotal);
     // The new app only recognizes 'pending'/'partial'/'paid' — never 'unpaid'.
     const paymentStatus = remainingAmount <= 0 ? 'paid' : (settledTotal > 0 ? 'partial' : 'pending');
 
@@ -76,6 +90,39 @@ function toValidDate(value) {
     if (!value) return null;
     const parsed = value instanceof Date ? value : new Date(value);
     return isNaN(parsed.getTime()) || parsed.getFullYear() < 1971 ? null : parsed;
+}
+
+// Preserve legacy ZATCA history: an invoice already reported to ZATCA must
+// never land as 'pending' (the new app would try to submit it again — a
+// compliance violation). The full legacy response is kept for auditing.
+function mapZatcaFields(bill) {
+    const rawResponse = bill.zatca_status_description || null;
+    if (!bill.zatca_status && !rawResponse) {
+        return { status: 'pending', submitted: null, hash: null, response: null };
+    }
+
+    let reportingStatus = null;
+    let invoiceHash = null;
+    if (rawResponse) {
+        try {
+            const parsed = JSON.parse(rawResponse);
+            reportingStatus = parsed.reportingStatus || null;
+            invoiceHash = parsed.invoiceHash || null;
+        } catch (parseError) {
+            // Legacy description is not always JSON — the raw text is still
+            // stored in zatca_response below for manual review.
+        }
+    }
+
+    const accepted = ['REPORTED', 'CLEARED', 'ACCEPTED']
+        .includes(String(reportingStatus || '').toUpperCase());
+
+    return {
+        status: accepted ? 'accepted' : 'submitted',
+        submitted: toValidDate(bill.bill_paid_date) || toValidDate(bill.bill_date),
+        hash: invoiceHash,
+        response: rawResponse
+    };
 }
 
 // Deterministic fallback so re-runs produce identical created_at values
@@ -138,7 +185,8 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
             'bill_extra', 'payment_method', 'deposit_value', 'deposit_remain_value',
             'is_deleted', 'bill_cleaned_date', 'bill_delivery_date', 'bill_notes',
             'vat_part_value', 'offer_value', 'paid_cash', 'paid_card', 'bill_general_discount',
-            'is_urgent', 'bill_is_partnership', 'current_part_value'
+            'is_urgent', 'bill_is_partnership', 'current_part_value',
+            'zatca_status', 'zatca_status_description'
         ];
         const billSelectList = wantedBillColumns
             .map(col => existingBillColumns.has(col) ? col : `NULL AS ${col}`)
@@ -164,7 +212,8 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
         const maxBillNo = bills[bills.length - 1].bill_no;
         const [[conflict]] = await targetConn.execute(
             `SELECT COUNT(*) AS cnt FROM orders
-             WHERE id BETWEEN ? AND ? AND source NOT IN ('migration', 'subscription')`,
+             WHERE id BETWEEN ? AND ?
+               AND (source IS NULL OR source NOT IN ('migration', 'subscription'))`,
             [minBillNo, maxBillNo]
         );
         if (conflict.cnt > 0) {
@@ -175,9 +224,13 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
 
         const [billItems] = await sourceConn.execute(
             `SELECT bct.bill_no, bct.io_types_operation_id, bct.type_count, bct.type_total_cost,
-                    ito.type_id, ito.operation_id
+                    ito.type_id, ito.operation_id,
+                    it.type_name, it.type_name_en,
+                    op.operation_name, op.operation_name_en
              FROM bill_closes_types bct
              LEFT JOIN io_types_operation ito ON bct.io_types_operation_id = ito.io_types_operation_id
+             LEFT JOIN io_types it ON it.type_id = ito.type_id
+             LEFT JOIN io_operations op ON op.operation_id = ito.operation_id
              ORDER BY bct.bill_no`
         );
 
@@ -186,6 +239,15 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
         // avoid FK failures.
         const [targetCustomerRows] = await targetConn.execute(`SELECT id FROM customers`);
         const targetCustomerIds = new Set(targetCustomerRows.map(r => r.id));
+
+        // وضع عرض الأسعار (شامل/غير شامل) يُؤخذ من شاشة إعدادات البرنامج الجديد —
+        // بدونه تأخذ الفواتير المنقولة الافتراضي 'exclusive' فيضيف مُرسِل الهيئة
+        // الضريبة مرة ثانية ويرفض الإرسال (حارس مطابقة الإجمالي في mapper.js).
+        const [settingsRows] = await targetConn.execute(
+            `SELECT price_display_mode FROM app_settings WHERE id = 1`
+        );
+        const priceDisplayMode = settingsRows.length && settingsRows[0].price_display_mode === 'exclusive'
+            ? 'exclusive' : 'inclusive';
 
         const [subscriptionPeriods] = await targetConn.execute(`
             SELECT sp.id, sp.period_from, sp.period_to, cs.customer_id
@@ -228,6 +290,7 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                 const matchedPeriod = findMatchingPeriod(subscriptionPeriodLookup, custId, billDate);
 
                 const payment = normalizePaymentBreakdown(bill, totalAmount, paymentMethod);
+                const zatca = mapZatcaFields(bill);
                 const isSubscriptionSettlement = payment.isSubscriptionSettlement;
                 // Legacy subscription bills are real tax invoices (they carry VAT and
                 // an invoice number), so never mark them consumption-only — the new
@@ -246,7 +309,8 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                     discountAmount,
                     vatAmount,
                     totalAmount,
-                    payment
+                    payment,
+                    zatca
                 });
             }
 
@@ -281,11 +345,16 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                 order.isConsumptionOnly ? 1 : 0,
                 order.payment.subscriptionConsumed,
                 order.isSubscriptionSettlement ? (order.matchedPeriod ? order.matchedPeriod.id : null) : null,
-                parseFloat(order.bill.bill_general_discount) || 0
+                parseFloat(order.bill.bill_general_discount) || 0,
+                priceDisplayMode,
+                order.zatca.status,
+                order.zatca.submitted,
+                order.zatca.hash,
+                order.zatca.response
             ]));
 
             const orderPlaceholders = orderRows.map(() =>
-                '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             ).join(', ');
 
             await targetConn.execute(
@@ -296,7 +365,8 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                     created_at, payment_status, paid_at, fully_paid_at, cleaning_date,
                     delivery_date, extra_amount, source, source_ref_id, order_type,
                     subscription_period_id, is_consumption_only, consumption_amount,
-                    settled_by_subscription_period_id, customer_discount_amount
+                    settled_by_subscription_period_id, customer_discount_amount,
+                    price_display_mode, zatca_status, zatca_submitted, zatca_hash, zatca_response
                 ) VALUES ${orderPlaceholders}
                 ON DUPLICATE KEY UPDATE
                     order_number = VALUES(order_number),
@@ -327,7 +397,12 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                     is_consumption_only = VALUES(is_consumption_only),
                     consumption_amount = VALUES(consumption_amount),
                     settled_by_subscription_period_id = VALUES(settled_by_subscription_period_id),
-                    customer_discount_amount = VALUES(customer_discount_amount)`,
+                    customer_discount_amount = VALUES(customer_discount_amount),
+                    price_display_mode = VALUES(price_display_mode),
+                    zatca_status = VALUES(zatca_status),
+                    zatca_submitted = VALUES(zatca_submitted),
+                    zatca_hash = VALUES(zatca_hash),
+                    zatca_response = VALUES(zatca_response)`,
                 orderRows.flatMap(row => row)
             );
 
@@ -341,7 +416,11 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
             for (const order of normalizedOrders) {
                 const items = itemsByBill[order.bill.bill_no] || [];
                 for (const item of items) {
-                    const qty = parseInt(item.type_count) || 1;
+                    // A stored quantity of 0 stays 0 (data to review), only a
+                    // missing/unparsable quantity falls back to the legacy
+                    // default of 1 — "|| 1" used to silently turn 0 into 1.
+                    const parsedQty = parseInt(item.type_count, 10);
+                    const qty = Number.isFinite(parsedQty) ? parsedQty : 1;
                     const lineTotal = parseFloat(item.type_total_cost) || 0;
                     const unitPrice = qty > 0 ? lineTotal / qty : 0;
 
@@ -351,7 +430,11 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                         item.operation_id || null,
                         qty,
                         unitPrice,
-                        lineTotal
+                        lineTotal,
+                        item.type_name || null,
+                        item.type_name_en || null,
+                        item.operation_name || null,
+                        item.operation_name_en || null
                     ]);
                 }
 
@@ -385,12 +468,15 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                 }
 
                 if (!order.isSubscriptionSettlement && order.payment.paidCash === 0 && order.payment.paidCard === 0 && order.payment.paidAmount > 0) {
+                    // credit / bank_transfer payments: record the payment under its
+                    // real method with zero cash/card amounts — never as drawer cash.
+                    const method = order.paymentMethod === 'subscription' ? 'cash' : order.paymentMethod;
                     paymentRows.push([
                         order.bill.bill_no,
                         order.payment.paidAmount,
-                        order.paymentMethod === 'subscription' ? 'cash' : order.paymentMethod,
-                        order.paymentMethod === 'card' ? 0 : order.payment.paidAmount,
-                        order.paymentMethod === 'card' ? order.payment.paidAmount : 0,
+                        method,
+                        method === 'cash' ? order.payment.paidAmount : 0,
+                        method === 'card' ? order.payment.paidAmount : 0,
                         paymentDate,
                         order.bill.username || 'migration',
                         paymentNotes
@@ -407,9 +493,10 @@ async function migrateOrders(sourceConfig, targetConfig, progressCallback) {
                 orderIds
             );
             if (itemRows.length > 0) {
-                const itemPlaceholders = itemRows.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
+                const itemPlaceholders = itemRows.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
                 await targetConn.execute(
-                    `INSERT INTO order_items (order_id, product_id, laundry_service_id, quantity, unit_price, line_total)
+                    `INSERT INTO order_items (order_id, product_id, laundry_service_id, quantity, unit_price, line_total,
+                                              product_name_ar, product_name_en, service_name_ar, service_name_en)
                      VALUES ${itemPlaceholders}`,
                     itemRows.flatMap(row => row)
                 );

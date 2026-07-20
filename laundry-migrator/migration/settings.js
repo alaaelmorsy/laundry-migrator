@@ -103,14 +103,29 @@ async function migrateSettings(sourceConfig, targetConfig, progressCallback) {
             return { success: true, migrated: 0 };
         }
 
+        const [[{ infoCount }]] = await sourceConn.execute('SELECT COUNT(*) AS infoCount FROM laundry_info');
+        if (Number(infoCount) > 1) {
+            progressCallback({ step: 'settings', percentage: 5,
+                message: `تحذير: جدول laundry_info يحتوي ${infoCount} سجل — سيتم استخدام أول سجل، راجع النتيجة يدويًا`,
+                type: 'warning' });
+        }
+
         const src = rows[0];
 
         progressCallback({ step: 'settings', percentage: 40, message: 'جاري كتابة الإعدادات...', type: 'info' });
 
-        const vatRate = (src.value_added_tax && src.value_added_tax > 0) ? src.value_added_tax : 15.00;
+        // An explicit 0% VAT in the source is a deliberate setting (e.g. not VAT
+        // registered) and must survive the migration; only a missing/invalid
+        // value falls back to the KSA default of 15%.
+        const parsedVat = parseFloat(src.value_added_tax);
+        const vatRate = Number.isFinite(parsedVat) && parsedVat >= 0 ? parsedVat : 15.00;
         const priceDisplayMode = toBool(src.is_tax_included) ? 'inclusive' : 'exclusive';
         const invoicePaperType = toBool(src.designed_a4) ? 'a4' : 'thermal';
-        const autoPrintInvoice = (src.printing_bills_no || 0) > 1 ? 1 : 0;
+        // The legacy schema has no auto-print flag — printing_bills_no is the
+        // COPY COUNT, not an on/off switch. Deriving behavior flags from it
+        // turned "2 copies" into "print automatically". Default to off; the
+        // copy count itself migrates into print_copies below.
+        const autoPrintInvoice = 0;
         const dayResetHour = Number.isInteger(Number(src.closure_hour)) ? Number(src.closure_hour) : null;
         const dayResetTime = toTimeString(src.closure_hour);
 
@@ -126,6 +141,10 @@ async function migrateSettings(sourceConfig, targetConfig, progressCallback) {
         }
 
         await dbManager.beginTransaction();
+
+        // UPDATE ... WHERE id = 1 silently does nothing on an empty table —
+        // guarantee the settings row exists so the write below always lands.
+        await targetConn.execute('INSERT IGNORE INTO app_settings (id) VALUES (1)');
 
         await targetConn.execute(
             `UPDATE app_settings SET
@@ -196,13 +215,24 @@ async function migrateSettings(sourceConfig, targetConfig, progressCallback) {
                 toBool(src.mandatory_mobile) ? 1 : 0,
                 toBool(src.show_barcode) ? 1 : 0,
                 toBool(src.show_mail) ? 1 : 0,
-                toBool(src.printing_bills_no) ? 1 : 0,
+                // The legacy schema has no per-event WhatsApp flags for
+                // print/pay (printing_bills_no is a copy count and
+                // is_allowed_whatsup is a general permission, not an event).
+                // Fabricating them from unrelated fields caused surprise
+                // messages to customers — they start off and the operator
+                // enables them deliberately in the new app.
+                0,
                 toBool(src.send_SMS_when_cleaned) ? 1 : 0,
                 toBool(src.send_SMS_when_delivered) ? 1 : 0,
-                toBool(src.is_allowed_whatsup) ? 1 : 0,
-                src.bill_tips || null,
+                0,
+                // bill_tips is the invoice footer note (already migrated to
+                // invoice_notes above) — it is NOT a WhatsApp message template.
+                null,
                 src.owmer_email_from || null,
-                src.owner_email_from_password || null,
+                // The target column expects a value encrypted by the NEW app;
+                // copying the legacy plaintext would leak the secret and break
+                // decryption. The operator re-enters it once in the new app.
+                null,
                 toBool(src.points_option) ? 1 : 0,
                 src.point_for_purchase || 1,
                 src.cust_support_end || null,
